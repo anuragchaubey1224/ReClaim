@@ -1,0 +1,31 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "reclaim"
+version = "0.0.0"
+description = "AI-guided disk-reclamation engine for developers"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Anurag Chaubey" }]
+keywords = ["disk", "cleanup", "developer-tools", "cli", "ai"]
+
+dependencies = [
+    "typer>=0.12",
+    "rich>=13.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+reclaim = "reclaim.cli.app:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/reclaim"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

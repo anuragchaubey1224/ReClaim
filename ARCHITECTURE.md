@@ -404,6 +404,12 @@ Why Reclaim is faster than `du` and disk analyzers.
 allocated-size accounting. If the interpreter ever becomes the bottleneck (profiled, not
 assumed), the hot walk moves to a **Rust extension (PyO3)** across the §5 data contract.
 
+**Measured (Phase 0, warm cache):** ~1.4× faster than `du -sk` on a 290k-file / 7.3 GB tree,
+with byte-accurate totals, plateauing at ~cpu×4 workers. Warm-cache scanning is **GIL-bound**
+— once syscall latency is hidden, per-entry Python work serializes — so the parallelism edge
+widens on cold cache / high-latency filesystems, and the ≥3× goal is reserved for the Rust
+hot-path (AD1) if profiling demands it.
+
 ---
 
 ## 10. Key design decisions (ADRs)
