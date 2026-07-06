@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from queue import Queue
 
-from reclaim.core.model import Candidate, ScanResult, Tier
+from reclaim.core.model import Candidate, ScanResult
 from reclaim.core.rules import is_reclaimable_unit
 from reclaim.platform import base as platform_base
 
@@ -121,12 +121,11 @@ class Scanner:
                     if entry.is_symlink():
                         continue     # never follow: avoids cycles + double counting
                     if entry.is_dir(follow_symlinks=False):
-                        hit = is_reclaimable_unit(
+                        rule = is_reclaimable_unit(
                             entry.name, self.include_context_sensitive
                         )
-                        if hit is not None:
-                            label, regen = hit
-                            self._absorb_blob(entry.path, label, regen, acc)
+                        if rule is not None:
+                            self._absorb_blob(entry.path, rule, acc)
                         else:
                             queue.put(entry.path)
                     else:
@@ -144,7 +143,7 @@ class Scanner:
         else:
             acc.hardlinks[key] = alloc           # dedup at merge time
 
-    def _absorb_blob(self, root: str, label: str, regen: str, acc: _Acc) -> None:
+    def _absorb_blob(self, root: str, rule, acc: _Acc) -> None:
         """Sum a reclaimable unit as one opaque blob: no per-file records, no descent
         into it for classification. Hard links are deduped within the blob."""
         alloc = apparent = files = 0
@@ -188,12 +187,12 @@ class Scanner:
         acc.candidates.append(
             Candidate(
                 path=Path(root),
-                kind=label,
+                kind=rule.label,
                 size_allocated=alloc,
                 size_apparent=apparent,
                 file_count=files,
-                tier=Tier.REGENERABLE,
-                regen_command=regen,
+                tier=rule.tier,             # provisional base tier; classifier refines it
+                regen_command=rule.regen_command,
             )
         )
 
