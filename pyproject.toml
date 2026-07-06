@@ -19,6 +19,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+# The AI co-pilot (Phase 2) is optional — the engine works fully with it absent (I7).
+# BYOK Claude needs the Anthropic SDK; the Ollama backend is stdlib-only.
+ai = ["anthropic>=0.69"]
 
 [project.scripts]
 reclaim = "reclaim.cli.app:app"
