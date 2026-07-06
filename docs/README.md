@@ -33,6 +33,12 @@ and a product that shows genuine CS depth to a hiring manager.
 | 7 | [`07-form-factor-and-cost.md`](./07-form-factor-and-cost.md) | What you install (CLI), where it runs (Mac/Linux/Windows), and why it costs ₹0 to operate |
 | 8 | [`08-benchmarks-and-results.md`](./08-benchmarks-and-results.md) | Living log of measured test + benchmark results per phase (for README/resume) |
 
+## Hands-on guides
+
+| Guide | For |
+|-------|-----|
+| [`windows-testing-guide.md`](./windows-testing-guide.md) | Step-by-step setup + safe test walkthrough for a Windows tester (sandbox first, then real projects) |
+
 ## Name options (decide later)
 
 | Name | Feel | Note |

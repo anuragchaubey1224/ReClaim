@@ -31,6 +31,14 @@ from reclaim.core.model import (
 from reclaim.core.preferences import PreferenceStore
 
 
+def _p(path: str) -> str:
+    """Expected path in the OS-native form the tools emit (`str(Path)` — `\\` on Windows).
+
+    The tools return native paths on purpose (a Windows user needs `C:\\...` to act on), so
+    assertions compare against `str(Path(...))` rather than a hardcoded POSIX literal."""
+    return str(Path(path))
+
+
 def _cand(path: str, size: int, *, kind: str | None = None, tier: Tier = Tier.REGENERABLE,
           conf: float = 0.9, root: Path | None = None) -> Candidate:
     p = Path(path)
@@ -62,7 +70,7 @@ def test_list_drops_red_and_sorts_largest_first() -> None:
     )
     out = list_reclaimable(ctx)
     paths = [i["path"] for i in out["items"]]
-    assert paths == ["/proj/b/.venv", "/proj/a/node_modules"]   # size desc, red omitted
+    assert paths == [_p("/proj/b/.venv"), _p("/proj/a/node_modules")]   # size desc, red omitted
     assert out["total_matched"] == 2
     assert out["total_bytes"] == 800
     assert out["truncated"] is False
@@ -87,7 +95,7 @@ def test_list_tier_filter() -> None:
 def test_list_min_bytes_filter() -> None:
     ctx = _ctx(_cand("/proj/big", 500), _cand("/proj/tiny", 10))
     out = list_reclaimable(ctx, min_bytes=100)
-    assert [i["path"] for i in out["items"]] == ["/proj/big"]
+    assert [i["path"] for i in out["items"]] == [_p("/proj/big")]
 
 
 def test_list_dormant_only() -> None:
@@ -100,7 +108,7 @@ def test_list_dormant_only() -> None:
                _cand("/proj/cold/nm", 500, root=cold),
                projects=projects)
     out = list_reclaimable(ctx, dormant_only=True)
-    assert [i["path"] for i in out["items"]] == ["/proj/cold/nm"]
+    assert [i["path"] for i in out["items"]] == [_p("/proj/cold/nm")]
     assert out["items"][0]["dormant"] is True
 
 
@@ -144,7 +152,7 @@ def test_facts_deepest_enclosing_project_wins() -> None:
     out = get_project_facts(_ctx(projects=(outer, inner)),
                             path="/proj/web/node_modules")
     assert out["found"] is True
-    assert out["root"] == "/proj/web"          # most specific enclosing root
+    assert out["root"] == _p("/proj/web")          # most specific enclosing root
 
 
 def test_facts_unknown_path() -> None:
@@ -250,7 +258,7 @@ def test_list_hides_preference_protected(tmp_path: Path) -> None:
     ctx = ToolContext(_result(_cand("/proj/work/nm", 300), _cand("/proj/play/nm", 200)),
                       preferences=prefs)
     paths = [i["path"] for i in list_reclaimable(ctx)["items"]]
-    assert paths == ["/proj/play/nm"]               # protected one is hidden this session
+    assert paths == [_p("/proj/play/nm")]               # protected one is hidden this session
 
 
 def test_estimate_excludes_preference_protected(tmp_path: Path) -> None:

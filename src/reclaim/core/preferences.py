@@ -21,6 +21,14 @@ from pathlib import Path
 from typing import Callable
 
 
+def _posix(path: Path | str) -> str:
+    """Path as a string with `/` separators, so glob/prefix matching is OS-agnostic.
+
+    Windows produces `\\` (from `str(Path)`) and even mixed separators (from
+    `os.path.expanduser`); collapsing both sides to `/` lets one code path serve every OS."""
+    return str(path).replace("\\", "/")
+
+
 @dataclass(frozen=True, slots=True)
 class Preference:
     """One protection rule: a path glob the user never wants reclaimed."""
@@ -34,9 +42,14 @@ class Preference:
 
         `~` is expanded. A glob (`~/work/**`, `*/secret`) matches via fnmatch — whose `*`
         spans `/`, so `~/work/**` covers the whole subtree. A bare directory (`~/work`) also
-        protects itself and everything beneath it."""
-        target = str(path)
-        pat = os.path.expanduser(self.pattern)
+        protects itself and everything beneath it.
+
+        Separators are normalised to `/` on both sides first: on Windows `str(Path)` yields
+        `\\` and `os.path.expanduser("~/x")` yields a *mixed* `C:\\Users\\me/x`, so a raw
+        comparison against a hardcoded `os.sep` silently fails to protect subtrees (the rule
+        would match the dir itself but not its contents). Normalising makes it OS-agnostic."""
+        target = _posix(path)
+        pat = _posix(os.path.expanduser(self.pattern))
         if fnmatch.fnmatch(target, pat):
             return True
         base = pat.rstrip("/")
@@ -44,7 +57,7 @@ class Preference:
             if base.endswith(suffix):
                 base = base[: -len(suffix)]
                 break
-        return bool(base) and (target == base or target.startswith(base + os.sep))
+        return bool(base) and (target == base or target.startswith(base + "/"))
 
 
 class PreferenceStore:

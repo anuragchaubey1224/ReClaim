@@ -45,6 +45,15 @@ def test_expanduser_applied() -> None:
     assert Preference("~/work").matches(Path.home() / "work" / "x")
 
 
+def test_matches_is_separator_agnostic() -> None:
+    """Regression (Windows): `str(Path)` yields `\\` and `expanduser` yields mixed
+    separators, so subtree protection must hold regardless of separator. Runs on every OS
+    by feeding backslash paths directly."""
+    assert Preference("/data/secret").matches("\\data\\secret\\db\\x.sqlite")
+    assert Preference("C:/Users/me/work").matches("C:\\Users\\me\\work\\app\\node_modules")
+    assert not Preference("/data/secret").matches("\\data\\secretive")   # boundary still safe
+
+
 # -- PreferenceStore ----------------------------------------------------------
 
 def test_empty_store(tmp_path: Path) -> None:
