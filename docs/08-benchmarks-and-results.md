@@ -22,17 +22,22 @@ _Warm cache unless stated. Times are best-of-3 full-process wall time (`/usr/bin
 | `context_sensitive_units_off_by_default` | `dist/ build/ out/` not flagged unless opted in (safety) |
 
 ### Scanner benchmark vs `du`
-Target scanned: `~/Desktop/PROJECTS` — **290,623 files across 8,935 dirs**, 7.3 GB.
+Target scanned: `~/Desktop/PROJECTS` — **290,654 files across 8,962 dirs**, 7.34 GB.
+_(best-of-3, warm cache; 2026-07-06 re-measure that closes the Phase 0 exit criteria.)_
 
 | Tool | Wall time | Speedup |
 |------|-----------|---------|
-| `du -sk` (single-threaded C) | 4.62 s | baseline |
-| **reclaim scanner** (32 threads) | **3.38 s** | **≈1.37× faster** |
+| `du -sk` (single-threaded C) | 5.15 s | baseline |
+| **reclaim scanner** (32 threads) | **3.27 s** | **≈1.57× faster** |
 
-- **Byte-accurate:** reported **7.3 GB allocated** vs `du`'s **7.34 GB** (block-based, matches).
+- **Byte-exact:** both report **7,877,898,240 bytes** allocated — a **0-byte difference**
+  from `du` on 290K real files. Validates block accounting (`st_blocks × 512`), hard-link
+  dedup, and symlink handling end-to-end.
+- **Hard-link dedup (controlled test):** a file + a hard link to it + one independent file →
+  scanner counts the shared inode **once** (307,200 B), matching `du` exactly.
 - **Worker sweep:** plateaus at ~cpu×4 (32) threads on this 8-core machine.
-- **Reclaimable found:** **4.4 GB** across **4,764 units** — top: `.venv` 738 MB, `node_modules`
-  584 MB, `.next` 235 MB, etc.
+- **Reclaimable found:** **4.38 GB** across **4,764 units** — top: `node_modules` 1.83 GB (8),
+  `.venv` 1.62 GB (7), `__pycache__` 530 MB (4,740 dirs), `.next` 420 MB (2).
 
 ### Key engineering insight (the honest one)
 Warm-cache scanning is **GIL-bound**: once syscall latency is hidden (data in RAM), the
@@ -48,8 +53,8 @@ empirically justified, not assumed (ADR AD1).
 
 ### Resume-bullet drafts (quantified — refine later)
 - *Built a multithreaded filesystem scanner in Python (`os.scandir` + thread pool) that
-  scans 290K files / 7.3 GB **~1.4× faster than `du`** with byte-accurate on-disk
-  accounting (block sizes, hard-link dedup, symlink-safe).*
+  scans 290K files / 7.34 GB **~1.57× faster than `du`** with **byte-exact** on-disk
+  accounting (0-byte diff from `du`: block sizes, hard-link dedup, symlink-safe).*
 - *Designed "opaque-blob pruning" — recognizing reclaimable units (`node_modules`, `.venv`)
   and summing them without building per-file metadata — keeping memory flat across millions
   of files.*

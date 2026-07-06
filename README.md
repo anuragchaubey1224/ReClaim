@@ -7,8 +7,9 @@ Reclaim safely finds and removes *regenerable* developer clutter — `node_modul
 build caches, Docker layers, `__pycache__` — while never touching irreplaceable work, with
 full explainability and one-command undo.
 
-> 🚧 **Status: Phase 0 (spike & foundations).** A working parallel scanner exists; the
-> deterministic engine, safety/undo, and AI agent come in later phases. This README is a
+> 🚧 **Status: Phase 0 complete (spike & foundations).** A working parallel scanner exists —
+> **byte-exact vs `du` (0-byte diff on 290K files) and ~1.57× faster**. The deterministic
+> classifier/analyzer, safety/undo, and AI agent come in later phases. This README is a
 > placeholder and will be expanded with usage, screenshots, and benchmarks.
 
 ## Documentation

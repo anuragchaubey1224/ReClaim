@@ -6,12 +6,12 @@ foundation and is impressive by itself.
 
 ---
 
-## Phase 0 — Spike & decide _(a weekend)_
+## Phase 0 — Spike & decide _(a weekend)_ ✅ **COMPLETE**
 Prove the risky part early. **Language decided: Python** (see [`04-technical-depth.md`](./04-technical-depth.md) §7).
-- [ ] Write a throwaway parallel scanner over `~/dev` using `os.scandir` + `ThreadPoolExecutor`; measure it against `du`.
-- [ ] Confirm the byte-accounting approach (inodes, hard links) on your real machine.
-- [ ] Establish the module boundaries from §7.2 (`scanner / classifier / … / ai`) so the hot path stays swappable later.
-- **Exit criteria:** you can scan your home dir fast and print total reclaimable bytes.
+- [x] Parallel scanner (`os.scandir` + thread pool, `Queue.join()` termination); measured vs `du`: **~1.57× faster** on 290K files (see [`08-benchmarks-and-results.md`](./08-benchmarks-and-results.md)).
+- [x] Byte-accounting confirmed on real machine: **0-byte difference from `du`** over 290K files; hard-link dedup validated with a controlled test (shared inode counted once).
+- [x] Module boundaries established (`platform / core.scanner / core.rules / core.model / cli`) so the hot path stays swappable later.
+- **Exit criteria:** ✅ scans the home/projects dir fast and prints total reclaimable bytes.
 
 ## Phase 1 — The engine (MVP) _(the core project)_
 This alone is a legitimate, strong portfolio project.
