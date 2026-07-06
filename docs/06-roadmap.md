@@ -24,13 +24,20 @@ milestones: **1a** classification intelligence (read-only), **1b** reversible re
   mtime dormancy)_
 - [x] `reclaim scan` / `reclaim status` with a clean grouped report. _(1a — tiered report +
   per-project fact sheets)_
-- [ ] Quarantine store + write-ahead journal + `reclaim apply` / `reclaim undo`. _(1b + 1c)_
-- [~] Tests for the safety invariants. _(1a: git-WIP hard-protect, unknown⇒🔴, protect-paths
-  win — 29 tests green; undo-restores-exactly lands in 1b.)_
-- **Exit criteria:** a stranger can safely reclaim space with it, no AI involved.
+- [x] Quarantine store + write-ahead journal + Safety Gate. _(1b — atomic apply, crash
+  recovery, cross-FS copy-verify-delete, TOCTOU re-check. CLI `apply`/`undo` land in 1c.)_
+- [x] Tests for the safety invariants. _(1a + 1b — git-WIP hard-protect, unknown⇒🔴,
+  protect-paths win, **undo restores byte-identical**, crash rolls back, never clobbers —
+  43 tests green.)_
+- **Exit criteria:** a stranger can safely reclaim space with it, no AI involved. _(engine
+  complete; 1c wires it to the CLI.)_
 
 > **1a status (done):** `reclaim status` classifies a real 290K-file tree in ~3.4 s into
 > 🟢/🟡/🔴 with git-state and dormancy per project; nothing is ever removed (read-only).
+>
+> **1b status (done):** reversible removal core — never `rm` (move to quarantine), write-ahead
+> journal with startup crash-recovery, atomic all-or-nothing transactions, and a Safety Gate
+> that re-checks git at apply time. End-to-end scan→plan→gate→apply→undo is byte-identical.
 
 ## Phase 2 — The AI agent _(the differentiator)_
 - [ ] `reclaim chat` with grounded tool-calling (Claude API).
