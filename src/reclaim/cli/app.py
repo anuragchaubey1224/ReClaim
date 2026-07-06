@@ -77,6 +77,22 @@ def _resolve_path(path: Optional[Path]) -> Path:
     return (path or Path.home()).expanduser()
 
 
+def _short_path(p: Path, width: int = 46) -> str:
+    """Home-relative, middle-elided path that keeps the meaningful tail (project/unit)
+    visible so table rows never wrap: `~/dev/…/webapp/node_modules`."""
+    try:
+        s = "~/" + str(p.relative_to(Path.home()))
+    except ValueError:
+        s = str(p)
+    if len(s) <= width:
+        return s
+    parts = Path(s).parts
+    if len(parts) <= 3:
+        return "…" + s[-(width - 1):]
+    tail = os.path.join(*parts[-2:])            # last two components (project/unit)
+    return f"{parts[0].rstrip(os.sep)}/…/{tail}"
+
+
 def _goal(free: Optional[str], include_costly: bool, dormant_only: bool,
           kind: Optional[List[str]], min_size: Optional[str],
           include_low_confidence: bool) -> PlanGoal:
@@ -172,14 +188,14 @@ def _render_plan(pr: PlanResult, gate: GateResult) -> None:
             f"[dim]{approved.total_files:,} files[/]\n"
         )
         table = Table(show_header=True, header_style="dim", box=None, pad_edge=False)
-        table.add_column("size", justify="right", style="green")
-        table.add_column("unit")
-        table.add_column("path")
-        table.add_column("rebuild", style="dim")
+        table.add_column("size", justify="right", style="green", no_wrap=True)
+        table.add_column("unit", no_wrap=True)
+        table.add_column("path", no_wrap=True)
+        table.add_column("rebuild", style="dim", no_wrap=True, overflow="ellipsis")
         for op in sorted(approved.operations, key=lambda o: o.size_allocated, reverse=True):
             emoji = _TIER_META[op.tier][0]
             table.add_row(human_bytes(op.size_allocated), f"{emoji} {op.kind}",
-                          str(op.source), op.regen_command or "")
+                          _short_path(op.source), op.regen_command or "")
         console.print(table)
 
     for risk in approved.risks:
@@ -188,7 +204,8 @@ def _render_plan(pr: PlanResult, gate: GateResult) -> None:
     if gate.has_rejections:
         console.print(f"\n[red]{len(gate.rejected)} item(s) blocked by the safety gate:[/]")
         for rej in gate.rejected[:10]:
-            console.print(f"  [red]✗[/] {rej.operation.source} [dim]— {rej.reason}[/]")
+            console.print(f"  [red]✗[/] {_short_path(rej.operation.source)} "
+                          f"[dim]— {rej.reason}[/]")
 
     skipped = len(pr.excluded)
     if skipped:
