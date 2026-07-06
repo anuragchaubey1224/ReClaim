@@ -194,13 +194,15 @@ def _is_within(path: Path, root: Path) -> bool:
 # Tool: estimate_plan
 # --------------------------------------------------------------------------- #
 
-def estimate_plan(ctx: ToolContext, *, paths: list[str]) -> dict[str, Any]:
-    """Totals + per-item tier + risks for a *specific* selection of paths.
+def select_paths(
+    ctx: ToolContext, paths: list[str]
+) -> tuple[list[Candidate], list[dict[str, str]], list[str]]:
+    """Resolve a list of path strings against the scan → (selected, excluded, not_found).
 
-    The agent picks paths (from `list_reclaimable`) and asks "what would this free?". Honest
-    by construction: a path that isn't a reclaimable unit is reported under `excluded`
-    (🔴/unknown unit) or `not_found` — it can never sneak into the totals. This is preview
-    only; committing is `propose_plan` → Safety Gate (Phase 2b)."""
+    The single source of truth for path→unit matching, shared by `estimate_plan` and the
+    agent's `propose_plan`. `selected` are reclaimable (🟢/🟡) candidates; `excluded` are
+    matched-but-protected (🔴/unknown) with a reason; `not_found` are paths no scanned unit
+    covers. Duplicates are collapsed. A 🔴 path can never land in `selected` (fail-safe)."""
     by_path: dict[str, Candidate] = {str(c.path): c for c in ctx.scan.candidates}
 
     selected: list[Candidate] = []
@@ -220,7 +222,17 @@ def estimate_plan(ctx: ToolContext, *, paths: list[str]) -> dict[str, Any]:
         else:
             excluded.append({"path": raw,
                              "reason": f"{_TIER_NAME[cand.tier]} — {cand.reason or 'protected'}"})
+    return selected, excluded, not_found
 
+
+def estimate_plan(ctx: ToolContext, *, paths: list[str]) -> dict[str, Any]:
+    """Totals + per-item tier + risks for a *specific* selection of paths.
+
+    The agent picks paths (from `list_reclaimable`) and asks "what would this free?". Honest
+    by construction: a path that isn't a reclaimable unit is reported under `excluded`
+    (🔴/unknown unit) or `not_found` — it can never sneak into the totals. This is preview
+    only; committing is `propose_plan` → Safety Gate (Phase 2b)."""
+    selected, excluded, not_found = select_paths(ctx, paths)
     plan = Plan.from_candidates(selected)
     by_tier: dict[str, dict[str, int]] = {}
     for op in plan.operations:

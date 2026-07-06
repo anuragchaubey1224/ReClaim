@@ -17,14 +17,16 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 import typer
 from rich.console import Console
 from rich.table import Table
 
+from reclaim.ai.agent import Agent, Proposal
+from reclaim.ai.tools import ToolContext
 from reclaim.core.classifier import classify_scan
-from reclaim.core.model import OpState, ScanResult, Tier
+from reclaim.core.model import OpState, Plan, ScanResult, Tier
 from reclaim.core.planner import Planner, PlanGoal, PlanResult, parse_size
 from reclaim.core.quarantine import QuarantineStore, UndoError
 from reclaim.core.scanner import Scanner
@@ -372,6 +374,118 @@ def purge(older_than: float = typer.Option(7.0, "--older-than",
         return
     console.print(f"[bold]purged {len(purged)} op(s)[/] older than {older_than:g}d "
                   f"[dim]— blocks freed permanently[/]")
+
+
+# --------------------------------------------------------------------------- #
+# The AI chat loop (Phase 2b) — grounded agent → propose → gate → confirm → apply
+# --------------------------------------------------------------------------- #
+
+def _make_provider(use_ollama: bool, model: Optional[str]):
+    """Pick a backend. Imports are lazy so `reclaim` loads without the anthropic SDK (I7)."""
+    if use_ollama:
+        from reclaim.ai.providers.ollama import OllamaProvider
+        return OllamaProvider(model=model) if model else OllamaProvider()
+    from reclaim.ai.providers.claude import ClaudeProvider
+    return ClaudeProvider(model=model) if model else ClaudeProvider()
+
+
+def _apply_proposal(proposal: Proposal, *, store: QuarantineStore,
+                    write: Callable[[str], None], confirm: Callable[[Plan], bool],
+                    auto_yes: bool) -> None:
+    """Route an AI proposal through the *same* Safety Gate + confirm + quarantine as `apply`.
+
+    The gate runs fresh here (not when the model proposed) so it re-checks git state at the
+    real moment of removal (I6 TOCTOU). The model never reaches this code."""
+    gate = SafetyGate().validate(proposal.plan)
+    pr = PlanResult(plan=proposal.plan, goal=PlanGoal(),
+                    considered=len(proposal.plan.operations), excluded=())
+    _render_plan(pr, gate)
+    if gate.approved.is_empty:
+        write("[dim]the safety gate blocked the whole proposal — nothing to do.[/]")
+        return
+    if not auto_yes and not confirm(gate.approved):
+        write("[dim]aborted — nothing was touched.[/]")
+        return
+    tx = store.apply(gate.approved)
+    write(f"[bold green]✓ reclaimed {human_bytes(tx.freed_bytes)}[/] across "
+          f"{len(tx.items)} unit(s) — [dim]op {tx.op_id}[/] "
+          f"(undo: [bold]reclaim undo {tx.op_id}[/])")
+
+
+def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
+             write: Callable[[str], None], store: QuarantineStore,
+             confirm: Callable[[Plan], bool], auto_yes: bool = False) -> None:
+    """Drive one chat session. Injectable I/O + store make this testable with a fake provider.
+
+    Loop: read a line → agent answers (running read-only tools) → if it proposed a plan,
+    gate + confirm + apply it. Provider errors keep the REPL alive rather than crashing."""
+    while True:
+        try:
+            line = read()
+        except (EOFError, KeyboardInterrupt):
+            break
+        if line is None:
+            break
+        line = line.strip()
+        if not line:
+            continue
+        if line.lower() in {"exit", "quit", ":q"}:
+            break
+        try:
+            reply = agent.send(line)
+        except Exception as e:                      # noqa: BLE001 - REPL must survive it
+            write(f"[red]error:[/] {e}")
+            continue
+        if reply.text:
+            write(reply.text)
+        if reply.truncated:
+            write("[yellow](stopped after several tool steps — ask again to continue)[/]")
+        if reply.proposal is not None and reply.proposal.is_actionable:
+            _apply_proposal(reply.proposal, store=store, write=write,
+                            confirm=confirm, auto_yes=auto_yes)
+
+
+@app.command()
+def chat(
+    path: Optional[Path] = _PATH_ARG,
+    ollama: bool = typer.Option(False, "--ollama",
+                                help="Use a local Ollama model instead of Claude"),
+    model: Optional[str] = typer.Option(None, "--model", help="Override the model id"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip the apply confirmation"),
+    workers: Optional[int] = _WORKERS_OPT,
+    context_sensitive: bool = _CS_OPT,
+) -> None:
+    """Chat with the grounded AI agent to plan and reclaim space (Claude BYOK by default).
+
+    The agent can only read facts and *propose* a plan; every removal still goes through the
+    Safety Gate and your confirmation. Needs ANTHROPIC_API_KEY (or `--ollama` for a local
+    model). The engine works fully without this command."""
+    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive)
+    _print_scan_line(res, scanner)
+    store = _store()
+    _recover(store)
+    provider = _make_provider(ollama, model)
+    agent = Agent(provider, ToolContext(res))
+    console.print(
+        f"[dim]chat ready · {provider.name}:{provider.model or 'default'} · "
+        f"{human_bytes(res.reclaimable_allocated)} reclaimable[/] "
+        "[dim]— describe what to free, or type 'exit'.[/]"
+    )
+
+    def read() -> Optional[str]:
+        try:
+            return input("› ")
+        except EOFError:
+            return None
+
+    def confirm(plan: Plan) -> bool:
+        return typer.confirm(
+            f"Reclaim {human_bytes(plan.total_bytes)} across "
+            f"{len(plan.operations)} unit(s)? Everything is undoable."
+        )
+
+    run_chat(agent, read=read, write=console.print, store=store,
+             confirm=confirm, auto_yes=yes)
 
 
 if __name__ == "__main__":
