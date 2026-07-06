@@ -29,6 +29,12 @@ from reclaim.ai.providers.ollama import (
     results_to_messages,
     specs_to_ollama,
 )
+from reclaim.ai.providers.openai_compatible import (
+    OpenAICompatibleProvider,
+    parse_openai_message,
+    results_to_openai_messages,
+    specs_to_openai,
+)
 from reclaim.ai.tools import TOOLS
 
 
@@ -218,3 +224,85 @@ def test_ollama_tool_loop_and_payload_shape() -> None:
         "list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan"}
     # Second request includes the tool result message in order.
     assert sent[1]["messages"][-1] == {"role": "tool", "content": '{"total_bytes": 800}'}
+
+
+# -- OpenAI-compatible: pure helpers (OpenRouter / OpenAI / local) -------------
+
+def test_specs_to_openai_shape() -> None:
+    out = specs_to_openai(tool_specs(TOOLS))
+    assert out[0]["type"] == "function"
+    assert {"name", "description", "parameters"} <= set(out[0]["function"])
+
+
+def test_parse_openai_message_with_tool_calls() -> None:
+    msg = {"role": "assistant", "content": "checking",
+           "tool_calls": [{"id": "call_1", "type": "function",
+                           "function": {"name": "list_reclaimable",
+                                        "arguments": '{"tier": "green"}'}}]}
+    turn = parse_openai_message(msg)
+    assert turn.text == "checking"
+    assert turn.stop_reason == "tool_use"
+    assert turn.tool_calls[0].id == "call_1"          # real id round-trips
+    assert turn.tool_calls[0].arguments == {"tier": "green"}
+
+
+def test_parse_openai_message_null_content() -> None:
+    msg = {"role": "assistant", "content": None,
+           "tool_calls": [{"id": "call_2", "function": {"name": "estimate_plan",
+                                                        "arguments": ""}}]}
+    turn = parse_openai_message(msg)
+    assert turn.text == ""                             # null content → empty string
+    assert turn.tool_calls[0].arguments == {}
+
+
+def test_parse_openai_message_no_tools_is_end_turn() -> None:
+    turn = parse_openai_message({"role": "assistant", "content": "all done"})
+    assert turn.stop_reason == "end_turn" and not turn.wants_tools
+
+
+def test_results_to_openai_messages_keyed_by_id() -> None:
+    out = results_to_openai_messages([ToolResult("call_1", '{"ok": true}')])
+    assert out == [{"role": "tool", "tool_call_id": "call_1", "content": '{"ok": true}'}]
+
+
+def test_openai_compatible_tool_loop_and_payload() -> None:
+    scripted = [
+        {"choices": [{"finish_reason": "tool_calls", "message": {
+            "role": "assistant", "content": None,
+            "tool_calls": [{"id": "call_1", "type": "function",
+                            "function": {"name": "list_reclaimable", "arguments": "{}"}}]}}]},
+        {"choices": [{"finish_reason": "stop", "message": {
+            "role": "assistant", "content": "Freed 800 MB."}}]},
+    ]
+    sent: list[dict] = []
+
+    def transport(url: str, payload: dict) -> dict:
+        sent.append({**payload, "messages": list(payload["messages"])})
+        return scripted[len(sent) - 1]
+
+    provider = OpenAICompatibleProvider(
+        model="anthropic/claude-opus-4-8", base_url="https://openrouter.ai/api/v1",
+        name="openrouter", transport=transport)
+    assert isinstance(provider, Provider)
+    provider.start("SYS", tool_specs(TOOLS))
+
+    turn1 = provider.send_user("what can I clean?")
+    assert turn1.tool_calls[0].name == "list_reclaimable"
+    turn2 = provider.send_tool_results([ToolResult("call_1", '{"total_bytes": 800}')])
+    assert turn2.text == "Freed 800 MB."
+
+    first = sent[0]
+    assert first["model"] == "anthropic/claude-opus-4-8" and first["stream"] is False
+    assert first["messages"][0] == {"role": "system", "content": "SYS"}
+    assert {t["function"]["name"] for t in first["tools"]} == {
+        "list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan"}
+    assert sent[1]["messages"][-1] == {
+        "role": "tool", "tool_call_id": "call_1", "content": '{"total_bytes": 800}'}
+
+
+def test_openai_compatible_sets_bearer_auth() -> None:
+    p = OpenAICompatibleProvider(model="m", base_url="https://x/v1", api_key="sk-123")
+    assert p._headers["Authorization"] == "Bearer sk-123"
+    # No key (e.g. local server) → no auth header sent.
+    assert "Authorization" not in OpenAICompatibleProvider(
+        model="m", base_url="http://localhost:8000/v1")._headers

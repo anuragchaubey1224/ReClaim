@@ -10,12 +10,15 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Sequence
 
+import pytest
+import typer
 from typer.testing import CliRunner
 
 from reclaim.ai.agent import Agent
 from reclaim.ai.providers.base import AssistantTurn, Provider, ToolCall, ToolResult, ToolSpec
+from reclaim.ai.providers.openai_compatible import OpenAICompatibleProvider
 from reclaim.ai.tools import ToolContext
-from reclaim.cli.app import app, run_chat
+from reclaim.cli.app import _make_provider, app, run_chat
 from reclaim.core.model import Candidate, OpState, ScanResult, Tier
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore
@@ -189,7 +192,7 @@ def test_chat_command_end_to_end(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(
         "reclaim.cli.app._make_provider",
-        lambda use_ollama, model: _propose_then_say([str(nm)], "Proposed removing it."),
+        lambda kind, model, base_url=None: _propose_then_say([str(nm)], "Proposed removing it."),
     )
     env = {"RECLAIM_HOME": str(tmp_path / "home")}
     result = runner.invoke(app, ["chat", str(target), "--yes"], input="free it\n", env=env)
@@ -197,3 +200,26 @@ def test_chat_command_end_to_end(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0, result.output
     assert "reclaimed" in result.output
     assert not nm.exists()
+
+
+# -- provider selection (BYOK any provider) -----------------------------------
+
+def test_make_provider_openrouter_preset() -> None:
+    p = _make_provider("openrouter", "anthropic/claude-opus-4-8")
+    assert isinstance(p, OpenAICompatibleProvider)
+    assert p.name == "openrouter"
+    assert p._url == "https://openrouter.ai/api/v1/chat/completions"
+
+
+def test_make_provider_openai_compatible_needs_base_url_and_model() -> None:
+    with pytest.raises(typer.BadParameter):
+        _make_provider("openai-compatible", "m", None)          # no base_url
+    with pytest.raises(typer.BadParameter):
+        _make_provider("openrouter", None)                      # no model
+    p = _make_provider("openai-compatible", "local-model", "http://localhost:8000/v1")
+    assert p._url == "http://localhost:8000/v1/chat/completions"
+
+
+def test_make_provider_ollama() -> None:
+    from reclaim.ai.providers.ollama import OllamaProvider
+    assert isinstance(_make_provider("ollama", None), OllamaProvider)

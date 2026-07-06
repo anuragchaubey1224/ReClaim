@@ -391,11 +391,39 @@ def purge(older_than: float = typer.Option(7.0, "--older-than",
 # The AI chat loop (Phase 2b) — grounded agent → propose → gate → confirm → apply
 # --------------------------------------------------------------------------- #
 
-def _make_provider(use_ollama: bool, model: Optional[str]):
-    """Pick a backend. Imports are lazy so `reclaim` loads without the anthropic SDK (I7)."""
-    if use_ollama:
+# Preset base URLs + env var holding the key, for the OpenAI-compatible backends.
+_OPENAI_COMPAT_PRESETS = {
+    "openrouter": ("https://openrouter.ai/api/v1", "OPENROUTER_API_KEY"),
+    "openai": ("https://api.openai.com/v1", "OPENAI_API_KEY"),
+}
+
+
+def _make_provider(kind: str, model: Optional[str], base_url: Optional[str] = None):
+    """Pick a backend by name. Imports are lazy so `reclaim` loads without any SDK (I7).
+
+    "claude" (default, BYOK Anthropic) · "ollama" (local, no key) · "openrouter" / "openai" /
+    "openai-compatible" (any OpenAI-style /chat/completions endpoint — needs --model)."""
+    kind = kind.lower()
+    if kind == "ollama":
         from reclaim.ai.providers.ollama import OllamaProvider
         return OllamaProvider(model=model) if model else OllamaProvider()
+
+    if kind in ("openrouter", "openai", "openai-compatible"):
+        from reclaim.ai.providers.openai_compatible import OpenAICompatibleProvider
+        if kind == "openai-compatible":
+            if not base_url:
+                raise typer.BadParameter("--base-url is required for --provider "
+                                         "openai-compatible")
+            url, key_env = base_url, "OPENAI_API_KEY"
+        else:
+            default_url, key_env = _OPENAI_COMPAT_PRESETS[kind]
+            url = base_url or default_url
+        if not model:
+            raise typer.BadParameter(f"--model is required for --provider {kind} "
+                                     "(there is no default model)")
+        return OpenAICompatibleProvider(model=model, base_url=url, name=kind,
+                                        api_key=os.environ.get(key_env))
+
     from reclaim.ai.providers.claude import ClaudeProvider
     return ClaudeProvider(model=model) if model else ClaudeProvider()
 
@@ -462,9 +490,16 @@ def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
 @app.command()
 def chat(
     path: Optional[Path] = _PATH_ARG,
+    provider_name: str = typer.Option(
+        "claude", "--provider",
+        help="claude (default, ANTHROPIC_API_KEY) · ollama (local) · openrouter "
+             "(OPENROUTER_API_KEY) · openai (OPENAI_API_KEY) · openai-compatible (+--base-url)"),
     ollama: bool = typer.Option(False, "--ollama",
-                                help="Use a local Ollama model instead of Claude"),
-    model: Optional[str] = typer.Option(None, "--model", help="Override the model id"),
+                                help="Shortcut for --provider ollama (local, no key)"),
+    model: Optional[str] = typer.Option(None, "--model", help="Model id (required for "
+                                        "openrouter/openai/openai-compatible)"),
+    base_url: Optional[str] = typer.Option(None, "--base-url",
+                                           help="Endpoint for --provider openai-compatible"),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip the apply confirmation"),
     workers: Optional[int] = _WORKERS_OPT,
     context_sensitive: bool = _CS_OPT,
@@ -472,14 +507,15 @@ def chat(
     """Chat with the grounded AI agent to plan and reclaim space (Claude BYOK by default).
 
     The agent can only read facts and *propose* a plan; every removal still goes through the
-    Safety Gate and your confirmation. Needs ANTHROPIC_API_KEY (or `--ollama` for a local
-    model). The engine works fully without this command."""
+    Safety Gate and your confirmation. Bring your own provider — Claude, OpenRouter, OpenAI,
+    any OpenAI-compatible endpoint, or a fully-local Ollama model. The engine works fully
+    without this command."""
     res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive)
     _print_scan_line(res, scanner)
     store = _store()
     _recover(store)
     prefs = _prefs()
-    provider = _make_provider(ollama, model)
+    provider = _make_provider("ollama" if ollama else provider_name, model, base_url)
     agent = Agent(provider, ToolContext(res, preferences=prefs))
     console.print(
         f"[dim]chat ready · {provider.name}:{provider.model or 'default'} · "
