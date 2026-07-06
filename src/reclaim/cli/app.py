@@ -28,6 +28,7 @@ from reclaim.ai.tools import ToolContext
 from reclaim.core.classifier import classify_scan
 from reclaim.core.model import OpState, Plan, ScanResult, Tier
 from reclaim.core.planner import Planner, PlanGoal, PlanResult, parse_size
+from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore, UndoError
 from reclaim.core.scanner import Scanner
 from reclaim.humanize import human_bytes
@@ -59,6 +60,16 @@ def _store() -> QuarantineStore:
     return QuarantineStore(home=Path(home) if home else None)
 
 
+def _reclaim_home() -> Path:
+    home = os.environ.get("RECLAIM_HOME")
+    return Path(home) if home else Path.home() / ".reclaim"
+
+
+def _prefs() -> PreferenceStore:
+    """User protection rules, stored alongside the quarantine at `$RECLAIM_HOME`."""
+    return PreferenceStore(_reclaim_home() / "preferences.json")
+
+
 def _recover(store: QuarantineStore) -> None:
     """Repair any transaction interrupted by a prior crash, announcing what it did."""
     for action in store.recover():
@@ -71,7 +82,7 @@ def _scan_and_classify(path: Path, workers: Optional[int],
     with console.status(f"scanning [bold]{path}[/] …", spinner="dots"):
         raw = scanner.scan(path)
     with console.status("classifying projects (git state, activity) …", spinner="dots"):
-        res = classify_scan(raw)
+        res = classify_scan(raw, preferences=_prefs())
     return res, scanner
 
 
@@ -247,7 +258,7 @@ def _plan_flow(path: Path, workers: Optional[int], context_sensitive: bool,
     res, scanner = _scan_and_classify(path, workers, context_sensitive)
     _print_scan_line(res, scanner)
     pr = Planner().plan(res, goal)
-    gate = SafetyGate().validate(pr.plan)
+    gate = SafetyGate(preferences=_prefs()).validate(pr.plan)
     _render_plan(pr, gate)
     return pr, gate, scanner
 
@@ -391,12 +402,12 @@ def _make_provider(use_ollama: bool, model: Optional[str]):
 
 def _apply_proposal(proposal: Proposal, *, store: QuarantineStore,
                     write: Callable[[str], None], confirm: Callable[[Plan], bool],
-                    auto_yes: bool) -> None:
+                    auto_yes: bool, preferences: Optional[PreferenceStore] = None) -> None:
     """Route an AI proposal through the *same* Safety Gate + confirm + quarantine as `apply`.
 
-    The gate runs fresh here (not when the model proposed) so it re-checks git state at the
-    real moment of removal (I6 TOCTOU). The model never reaches this code."""
-    gate = SafetyGate().validate(proposal.plan)
+    The gate runs fresh here (not when the model proposed) so it re-checks git state and user
+    preferences at the real moment of removal (I6 TOCTOU). The model never reaches this code."""
+    gate = SafetyGate(preferences=preferences).validate(proposal.plan)
     pr = PlanResult(plan=proposal.plan, goal=PlanGoal(),
                     considered=len(proposal.plan.operations), excluded=())
     _render_plan(pr, gate)
@@ -414,7 +425,8 @@ def _apply_proposal(proposal: Proposal, *, store: QuarantineStore,
 
 def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
              write: Callable[[str], None], store: QuarantineStore,
-             confirm: Callable[[Plan], bool], auto_yes: bool = False) -> None:
+             confirm: Callable[[Plan], bool], auto_yes: bool = False,
+             preferences: Optional[PreferenceStore] = None) -> None:
     """Drive one chat session. Injectable I/O + store make this testable with a fake provider.
 
     Loop: read a line → agent answers (running read-only tools) → if it proposed a plan,
@@ -438,11 +450,13 @@ def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
             continue
         if reply.text:
             write(reply.text)
+        for pattern in reply.saved:
+            write(f"[green]✓ saved rule[/] — never touch [bold]{pattern}[/]")
         if reply.truncated:
             write("[yellow](stopped after several tool steps — ask again to continue)[/]")
         if reply.proposal is not None and reply.proposal.is_actionable:
             _apply_proposal(reply.proposal, store=store, write=write,
-                            confirm=confirm, auto_yes=auto_yes)
+                            confirm=confirm, auto_yes=auto_yes, preferences=preferences)
 
 
 @app.command()
@@ -464,8 +478,9 @@ def chat(
     _print_scan_line(res, scanner)
     store = _store()
     _recover(store)
+    prefs = _prefs()
     provider = _make_provider(ollama, model)
-    agent = Agent(provider, ToolContext(res))
+    agent = Agent(provider, ToolContext(res, preferences=prefs))
     console.print(
         f"[dim]chat ready · {provider.name}:{provider.model or 'default'} · "
         f"{human_bytes(res.reclaimable_allocated)} reclaimable[/] "
@@ -485,7 +500,51 @@ def chat(
         )
 
     run_chat(agent, read=read, write=console.print, store=store,
-             confirm=confirm, auto_yes=yes)
+             confirm=confirm, auto_yes=yes, preferences=prefs)
+
+
+# --------------------------------------------------------------------------- #
+# Preference memory — protection rules the engine enforces (AI-off usable, I7)
+# --------------------------------------------------------------------------- #
+
+@app.command()
+def protect(
+    pattern: str = typer.Argument(..., help="Path glob to never reclaim, e.g. '~/work/**'"),
+    note: str = typer.Option("", "--note", help="Optional reason to remember"),
+) -> None:
+    """Save a rule that a path glob must never be reclaimed (enforced by scan + safety gate)."""
+    try:
+        pref = _prefs().add(pattern, note)
+    except ValueError as e:
+        err.print(f"[red]error:[/] {e}")
+        raise typer.Exit(2) from e
+    console.print(f"[green]✓ protected[/] [bold]{pref.pattern}[/]"
+                  + (f" [dim]— {pref.note}[/]" if pref.note else ""))
+
+
+@app.command()
+def unprotect(pattern: str = typer.Argument(..., help="Exact pattern to remove")) -> None:
+    """Remove a protection rule by its exact pattern."""
+    if _prefs().remove(pattern):
+        console.print(f"[green]✓ removed[/] {pattern}")
+    else:
+        console.print(f"[dim]no rule matched {pattern!r}.[/]")
+
+
+@app.command()
+def prefs() -> None:
+    """List the saved protection rules."""
+    rules = _prefs().all()
+    if not rules:
+        console.print("[dim]no protection rules. add one with "
+                      "[bold]reclaim protect <glob>[/].[/]")
+        return
+    table = Table(show_header=True, header_style="dim", box=None, pad_edge=False)
+    table.add_column("pattern")
+    table.add_column("note", style="dim")
+    for p in rules:
+        table.add_row(p.pattern, p.note or "—")
+    console.print(table)
 
 
 if __name__ == "__main__":

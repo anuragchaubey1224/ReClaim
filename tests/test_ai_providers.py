@@ -39,7 +39,7 @@ def test_tool_specs_adapts_engine_tools() -> None:
     assert len(specs) == len(TOOLS)
     assert all(isinstance(s, ToolSpec) for s in specs)
     names = {s.name for s in specs}
-    assert names == {"list_reclaimable", "get_project_facts", "estimate_plan"}
+    assert names == {"list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan"}
     facts = next(s for s in specs if s.name == "get_project_facts")
     assert facts.input_schema["required"] == ["path"]
 
@@ -138,7 +138,7 @@ def test_claude_tool_loop_and_request_shape() -> None:
     assert first["output_config"] == {"effort": "high"}
     assert first["system"] == "SYS"
     assert {t["name"] for t in first["tools"]} == {
-        "list_reclaimable", "get_project_facts", "estimate_plan"}
+        "list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan"}
     # History replays exact assistant content: user, assistant(tool_use), user(result), assistant.
     assert len(provider._messages) == 4
     assert provider._messages[1]["role"] == "assistant"
@@ -215,6 +215,6 @@ def test_ollama_tool_loop_and_payload_shape() -> None:
     assert first["stream"] is False
     assert first["messages"][0] == {"role": "system", "content": "SYS"}
     assert {t["function"]["name"] for t in first["tools"]} == {
-        "list_reclaimable", "get_project_facts", "estimate_plan"}
+        "list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan"}
     # Second request includes the tool result message in order.
     assert sent[1]["messages"][-1] == {"role": "tool", "content": '{"total_bytes": 800}'}

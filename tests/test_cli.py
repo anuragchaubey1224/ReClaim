@@ -106,3 +106,27 @@ def test_free_target_limits_selection(sandbox) -> None:
     result = runner.invoke(app, ["plan", str(target), "--free", "10K"], env=env)
     assert result.exit_code == 0
     assert "node_modules" in result.output
+
+
+def test_protect_saves_and_prefs_lists(sandbox) -> None:
+    _, env = sandbox
+    saved = runner.invoke(app, ["protect", "~/work/**", "--note", "mine"], env=env)
+    assert saved.exit_code == 0
+    assert "protected" in saved.output
+
+    listed = runner.invoke(app, ["prefs"], env=env)
+    assert listed.exit_code == 0
+    assert "~/work/**" in listed.output
+
+
+def test_protected_unit_is_not_reclaimed(sandbox) -> None:
+    target, env = sandbox
+    nm, venv = _unit_paths(target)
+
+    protected = runner.invoke(app, ["protect", str(nm)], env=env)
+    assert protected.exit_code == 0
+
+    applied = runner.invoke(app, ["apply", str(target), "--yes"], env=env)
+    assert applied.exit_code == 0
+    assert nm.exists()                                # hard-protected by the saved rule
+    assert not venv.exists()                          # the unprotected unit is still reclaimed

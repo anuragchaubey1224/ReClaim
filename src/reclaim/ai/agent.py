@@ -30,8 +30,10 @@ from reclaim.ai.tools import TOOLS, ToolContext, ToolError, dispatch, select_pat
 from reclaim.core.model import Plan
 from reclaim.humanize import human_bytes
 
-#: The one non-read tool. Still cannot execute — it records a selection the human confirms.
+#: The two non-read tools. Neither executes: propose_plan records a selection the human
+#: confirms; save_preference only *adds* a protection (monotonically safe — can never unlock).
 PROPOSE_PLAN = "propose_plan"
+SAVE_PREFERENCE = "save_preference"
 
 # How many tool round-trips one user turn may take before we stop (runaway backstop).
 DEFAULT_MAX_STEPS = 8
@@ -55,6 +57,26 @@ _PROPOSE_SPEC = ToolSpec(
     },
 )
 
+_SAVE_PREF_SPEC = ToolSpec(
+    name=SAVE_PREFERENCE,
+    description=(
+        "Save a lasting rule that a path glob must never be reclaimed, e.g. '~/work/**'. Use "
+        "this when the user says to always protect or never touch something. It only ADDS "
+        "protection (it can never make anything reclaimable) and takes effect immediately and "
+        "in future scans. Confirm to the user what you protected."
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "pattern": {"type": "string",
+                        "description": "Path glob to protect, e.g. '~/work/**' or '*/secrets'."},
+            "note": {"type": "string", "description": "Optional short reason to remember."},
+        },
+        "required": ["pattern"],
+        "additionalProperties": False,
+    },
+)
+
 SYSTEM_PROMPT = """\
 You are Reclaim's assistant. You help a developer safely free disk space by removing \
 regenerable build artifacts (node_modules, virtualenvs, build caches, …) — never their real \
@@ -65,15 +87,20 @@ You can ONLY use these tools; you have no ability to delete, move, or run anythi
 Protected files are never listed.
   - get_project_facts: a project's git state, dormancy, and type — use it to justify why \
 removing something is safe.
+  - explain_unit: everything about one unit (tier, reason, rebuild command, project git \
+state, whether a user rule protects it) — use it to answer "why is this safe?".
   - estimate_plan: preview the space a specific set of paths would free.
   - propose_plan: hand a chosen set of paths to the user for confirmation. This does not \
 delete anything; the user confirms and a safety gate re-checks before removal.
+  - save_preference: save a lasting rule that a path glob must never be touched (e.g. \
+'~/work/**'). Use it when the user says to always protect or never touch something.
 
 Rules:
   - Ground every claim in a tool result. Never invent a path, size, or git state.
   - Prefer green units. If you include a yellow (costly) unit, say so and why.
-  - When the user wants to free space: list_reclaimable, optionally check project facts to \
-confirm safety, then propose_plan with the chosen paths.
+  - When the user wants to free space: list_reclaimable, optionally check project facts or \
+explain_unit to confirm safety, then propose_plan with the chosen paths.
+  - When the user asks why something is (un)safe, use explain_unit and answer from its facts.
   - Be concise. Report sizes in human units and explain briefly why the selection is safe.
 """
 
@@ -95,10 +122,11 @@ class Proposal:
 
 @dataclass(frozen=True, slots=True)
 class AgentReply:
-    """One user turn's outcome: the model's prose and, if it proposed one, a `Proposal`."""
+    """One user turn's outcome: the model's prose, any `Proposal`, and any saved rules."""
 
     text: str
     proposal: Proposal | None = None
+    saved: tuple[str, ...] = ()       # preference patterns saved this turn
     steps: int = 0
     truncated: bool = False           # hit max_steps with the model still calling tools
 
@@ -115,8 +143,9 @@ class Agent:
         self._started = False
 
     def start(self) -> None:
-        """Open the session: system prompt + the read-only tools plus `propose_plan`."""
-        self.provider.start(self._system, list(tool_specs(TOOLS)) + [_PROPOSE_SPEC])
+        """Open the session: system prompt + read-only tools plus propose_plan / save_preference."""
+        self.provider.start(self._system,
+                            list(tool_specs(TOOLS)) + [_PROPOSE_SPEC, _SAVE_PREF_SPEC])
         self._started = True
 
     def send(self, message: str) -> AgentReply:
@@ -127,21 +156,27 @@ class Agent:
 
     def _drive(self, turn) -> AgentReply:
         proposal: Proposal | None = None
+        saved: list[str] = []
         steps = 0
         while turn.wants_tools:
             if steps >= self._max_steps:
-                return AgentReply(text=turn.text, proposal=proposal, steps=steps,
-                                  truncated=True)
+                return AgentReply(text=turn.text, proposal=proposal, saved=tuple(saved),
+                                  steps=steps, truncated=True)
             steps += 1
             results = []
             for call in turn.tool_calls:
                 if call.name == PROPOSE_PLAN:
                     proposal, content = self._propose(dict(call.arguments))
                     results.append(ToolResult(call.id, content))
+                elif call.name == SAVE_PREFERENCE:
+                    pattern, content, is_error = self._save_preference(dict(call.arguments))
+                    if pattern is not None:
+                        saved.append(pattern)
+                    results.append(ToolResult(call.id, content, is_error=is_error))
                 else:
                     results.append(self._run_tool(call))
             turn = self.provider.send_tool_results(results)
-        return AgentReply(text=turn.text, proposal=proposal, steps=steps)
+        return AgentReply(text=turn.text, proposal=proposal, saved=tuple(saved), steps=steps)
 
     def _run_tool(self, call) -> ToolResult:
         try:
@@ -172,3 +207,23 @@ class Agent:
                     "removed; the safety gate re-checks it before any removal.",
         })
         return proposal, content
+
+    def _save_preference(self, args: dict) -> tuple[str | None, str, bool]:
+        """Persist a "never touch" rule. Returns (saved_pattern | None, json_content, is_error).
+
+        Only ever *adds* protection, so it's safe to apply without confirmation. Needs a
+        preference store on the context; without one it reports an error the model can relay."""
+        pattern = (args.get("pattern") or "").strip()
+        if self.ctx.preferences is None:
+            return None, json.dumps(
+                {"error": "preferences are not available in this session"}), True
+        if not pattern:
+            return None, json.dumps({"error": "pattern is required"}), True
+        pref = self.ctx.preferences.add(pattern, args.get("note", "") or "")
+        return pattern, json.dumps({
+            "saved": True,
+            "pattern": pref.pattern,
+            "note": pref.note,
+            "message": "Rule saved. Matching paths are now protected this session and in "
+                       "future scans; the safety gate enforces it too.",
+        }), False

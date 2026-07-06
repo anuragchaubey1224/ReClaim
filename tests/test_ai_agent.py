@@ -21,6 +21,7 @@ from reclaim.ai.providers.base import (
 )
 from reclaim.ai.tools import ToolContext
 from reclaim.core.model import Candidate, ScanResult, Tier
+from reclaim.core.preferences import PreferenceStore
 
 
 # -- fakes + builders ---------------------------------------------------------
@@ -90,12 +91,13 @@ def _ctx(*candidates: Candidate) -> ToolContext:
 
 # -- tests --------------------------------------------------------------------
 
-def test_start_advertises_readonly_tools_plus_propose() -> None:
+def test_start_advertises_readonly_tools_plus_actions() -> None:
     provider = FakeProvider([AssistantTurn(text="hi")])
     Agent(provider, _ctx()).send("hello")
     assert provider.system == SYSTEM_PROMPT
     assert {t.name for t in provider.tools} == {
-        "list_reclaimable", "get_project_facts", "estimate_plan", "propose_plan"}
+        "list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan",
+        "propose_plan", "save_preference"}
 
 
 def test_dispatches_readonly_tool_then_answers() -> None:
@@ -152,3 +154,29 @@ def test_max_steps_truncates_runaway() -> None:
     reply = Agent(LoopProvider(), _ctx(_cand("/p/nm", 300)), max_steps=3).send("loop")
     assert reply.truncated is True
     assert reply.steps == 3
+
+
+def test_save_preference_persists(tmp_path) -> None:
+    prefs = PreferenceStore(tmp_path / "p.json")
+    ctx = ToolContext(_ctx().scan, preferences=prefs)
+    provider = FakeProvider([
+        _tool_turn(ToolCall("1", "save_preference", {"pattern": "~/work/**"})),
+        AssistantTurn(text="I'll never touch ~/work."),
+    ])
+    reply = Agent(provider, ctx).send("never touch my work dir")
+    assert reply.saved == ("~/work/**",)
+    assert prefs.matches(Path.home() / "work" / "x") is not None
+    content = json.loads(provider.tool_result_batches[0][0].content)
+    assert content["saved"] is True
+
+
+def test_save_preference_without_store_errors() -> None:
+    provider = FakeProvider([
+        _tool_turn(ToolCall("1", "save_preference", {"pattern": "~/work/**"})),
+        AssistantTurn(text="couldn't save"),
+    ])
+    reply = Agent(provider, _ctx()).send("never touch my work dir")
+    assert reply.saved == ()
+    res = provider.tool_result_batches[0][0]
+    assert res.is_error is True
+    assert "error" in json.loads(res.content)

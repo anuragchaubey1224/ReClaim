@@ -17,6 +17,7 @@ from reclaim.ai.providers.base import AssistantTurn, Provider, ToolCall, ToolRes
 from reclaim.ai.tools import ToolContext
 from reclaim.cli.app import app, run_chat
 from reclaim.core.model import Candidate, OpState, ScanResult, Tier
+from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore
 
 runner = CliRunner()
@@ -137,6 +138,45 @@ def test_chat_survives_provider_error(tmp_path: Path) -> None:
              read=_reads("free it"), write=writes.append,
              store=QuarantineStore(home=tmp_path / "home"), confirm=lambda plan: True)
     assert any("no API key" in w for w in writes)             # error reported, loop survived
+
+
+# -- preference memory in the chat path --------------------------------------
+
+def test_chat_gate_blocks_preference_added_after_scan(tmp_path: Path) -> None:
+    # The in-memory scan (ctx) predates the rule, so the model still proposes the unit;
+    # the apply-time gate (fed the rule) must block it — defense in depth.
+    nm = _real_unit(tmp_path)
+    prefs = PreferenceStore(tmp_path / "home" / "preferences.json")
+    prefs.add(str(nm.parent))                                # protect the enclosing dir
+    agent = Agent(_propose_then_say([str(nm)], "Proposed."), _ctx_for(nm))
+    store = QuarantineStore(home=tmp_path / "home")
+    writes: list[str] = []
+
+    run_chat(agent, read=_reads("free it"), write=writes.append, store=store,
+             confirm=lambda plan: True, preferences=prefs)
+
+    assert nm.exists()                                      # gate rejected it
+    assert [o for o in store.list_ops() if o.state is OpState.COMMITTED] == []
+    assert any("blocked" in w for w in writes)
+
+
+def test_chat_save_preference_persists(tmp_path: Path) -> None:
+    nm = _real_unit(tmp_path)
+    prefs = PreferenceStore(tmp_path / "home" / "preferences.json")
+    ctx = ToolContext(_ctx_for(nm).scan, preferences=prefs)
+    provider = FakeProvider([
+        AssistantTurn(text="", tool_calls=(
+            ToolCall("1", "save_preference", {"pattern": "~/work/**"}),)),
+        AssistantTurn(text="Protected ~/work."),
+    ])
+    writes: list[str] = []
+
+    run_chat(Agent(provider, ctx), read=_reads("never touch ~/work"), write=writes.append,
+             store=QuarantineStore(home=tmp_path / "home"), confirm=lambda plan: True,
+             preferences=prefs)
+
+    assert prefs.matches(Path.home() / "work" / "x") is not None
+    assert any("saved rule" in w for w in writes)
 
 
 # -- chat command wiring (fake provider injected) -----------------------------

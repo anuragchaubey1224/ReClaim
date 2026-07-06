@@ -22,6 +22,7 @@ from __future__ import annotations
 from dataclasses import replace
 
 from reclaim.core.model import Candidate, ProjectFacts, ScanResult, Tier
+from reclaim.core.preferences import PreferenceStore
 from reclaim.core.project import ProjectAnalyzer
 from reclaim.core.rules import protect_reason
 
@@ -30,9 +31,24 @@ from reclaim.core.rules import protect_reason
 CONFIDENCE_THRESHOLD = 0.7
 
 
-def classify(candidate: Candidate, project: ProjectFacts | None) -> Candidate:
+def classify(
+    candidate: Candidate,
+    project: ProjectFacts | None,
+    preferences: PreferenceStore | None = None,
+) -> Candidate:
     """Return a copy of `candidate` with its final tier, confidence, and reason set."""
     root = project.root if project is not None else None
+
+    # 0. User preference: an explicit "never touch this path" rule wins over everything —
+    #    it can only protect, never unlock (I5). Top of the lattice above the built-ins.
+    if preferences is not None:
+        pref = preferences.matches(candidate.path)
+        if pref is not None:
+            reason = f"user preference: never touch {pref.pattern}"
+            if pref.note:
+                reason += f" ({pref.note})"
+            return replace(candidate, tier=Tier.IRREPLACEABLE, confidence=1.0,
+                           reason=reason, project_root=root)
 
     # 1. Protect lattice top: a protected path is irreplaceable regardless of anything else.
     #    (Known reclaimable units won't match, but this keeps the lattice invariant honest.)
@@ -73,12 +89,15 @@ def _score(candidate: Candidate, project: ProjectFacts | None) -> tuple[float, s
 
 
 def classify_scan(
-    result: ScanResult, analyzer: ProjectAnalyzer | None = None
+    result: ScanResult,
+    analyzer: ProjectAnalyzer | None = None,
+    preferences: PreferenceStore | None = None,
 ) -> ScanResult:
     """Enrich a raw scan: attach project facts and final tiers to every candidate.
 
     This is the join point of the §5 pipeline — FsNode/Candidate meets ProjectFacts. Runs
-    after the fast walk so the hot path stays free of git/classification work."""
+    after the fast walk so the hot path stays free of git/classification work. Saved user
+    preferences (if any) hard-protect matching paths here, before any plan is built."""
     analyzer = analyzer or ProjectAnalyzer()
 
     classified: list[Candidate] = []
@@ -87,7 +106,7 @@ def classify_scan(
         facts = analyzer.facts_for(cand.path)
         if facts is not None:
             roots[facts.root] = facts
-        classified.append(classify(cand, facts))
+        classified.append(classify(cand, facts, preferences))
 
     return replace(
         result,

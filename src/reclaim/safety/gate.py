@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from reclaim.core.classifier import classify
 from reclaim.core.model import Candidate, Operation, Plan
+from reclaim.core.preferences import PreferenceStore
 from reclaim.core.project import ProjectAnalyzer
 from reclaim.core.rules import is_reclaimable_unit, protect_reason
 
@@ -51,10 +52,14 @@ class SafetyGate:
     def __init__(
         self,
         analyzer_factory: Callable[[], ProjectAnalyzer] | None = None,
+        preferences: PreferenceStore | None = None,
     ) -> None:
         # A FRESH analyzer per validate() → git/activity are re-read, never served from a
         # plan-time cache. Injectable so tests can drive the git state deterministically.
         self._analyzer_factory = analyzer_factory or ProjectAnalyzer
+        # User protection rules, re-read at apply time — a rule added after planning still
+        # blocks removal here (defense in depth with the classifier's scan-time check).
+        self._preferences = preferences
 
     def validate(self, plan: Plan) -> GateResult:
         analyzer = self._analyzer_factory()
@@ -74,6 +79,12 @@ class SafetyGate:
         # 1. Existence — the item may have been removed/rebuilt since planning.
         if not src.exists():
             return "source no longer exists"
+
+        # 1b. User preference — an explicit "never touch" rule blocks removal (re-read fresh).
+        if self._preferences is not None:
+            pref = self._preferences.matches(src)
+            if pref is not None:
+                return f"user preference: never touch {pref.pattern}"
 
         # 2. Protected path — never reclaim a secret/data path (defensive top of lattice).
         pr = protect_reason(src.name, is_dir=True)

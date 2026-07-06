@@ -16,6 +16,7 @@ from reclaim.ai.tools import (
     ToolError,
     dispatch,
     estimate_plan,
+    explain_unit,
     get_project_facts,
     list_reclaimable,
 )
@@ -27,6 +28,7 @@ from reclaim.core.model import (
     ScanResult,
     Tier,
 )
+from reclaim.core.preferences import PreferenceStore
 
 
 def _cand(path: str, size: int, *, kind: str | None = None, tier: Tier = Tier.REGENERABLE,
@@ -210,8 +212,60 @@ def test_dispatch_bad_arguments_raises() -> None:
         dispatch("get_project_facts", {"wrong_kwarg": 1}, _ctx())
 
 
+# -- explain_unit -------------------------------------------------------------
+
+def test_explain_unit_bundles_facts() -> None:
+    root = Path("/proj/web")
+    facts = ProjectFacts(root, "node", GitState(GitStatus.CLEAN, "clean"),
+                         last_activity_days=200)
+    ctx = _ctx(_cand("/proj/web/node_modules", 500, kind="node_modules", root=root),
+               projects=(facts,))
+    out = explain_unit(ctx, path="/proj/web/node_modules")
+    assert out["found"] is True
+    assert out["tier"] == "green" and out["reclaimable"] is True
+    assert out["regen_command"] == "rebuild"
+    assert out["project"]["git_status"] == "clean" and out["project"]["is_dormant"] is True
+    assert out["user_protected"] is None
+
+
+def test_explain_unit_unknown_path() -> None:
+    out = explain_unit(_ctx(), path="/nowhere")
+    assert out["found"] is False
+
+
+def test_explain_unit_flags_user_protection(tmp_path: Path) -> None:
+    prefs = PreferenceStore(tmp_path / "p.json")
+    prefs.add("/proj/**")
+    ctx = ToolContext(_result(_cand("/proj/nm", 300)), preferences=prefs)
+    out = explain_unit(ctx, path="/proj/nm")
+    assert out["user_protected"] is not None
+    assert out["reclaimable"] is False              # a saved rule overrides the green tier
+
+
+# -- preferences hide/exclude protected paths --------------------------------
+
+def test_list_hides_preference_protected(tmp_path: Path) -> None:
+    prefs = PreferenceStore(tmp_path / "p.json")
+    prefs.add("/proj/work/**")
+    ctx = ToolContext(_result(_cand("/proj/work/nm", 300), _cand("/proj/play/nm", 200)),
+                      preferences=prefs)
+    paths = [i["path"] for i in list_reclaimable(ctx)["items"]]
+    assert paths == ["/proj/play/nm"]               # protected one is hidden this session
+
+
+def test_estimate_excludes_preference_protected(tmp_path: Path) -> None:
+    prefs = PreferenceStore(tmp_path / "p.json")
+    prefs.add("/proj/work/**")
+    ctx = ToolContext(_result(_cand("/proj/work/nm", 300)), preferences=prefs)
+    out = estimate_plan(ctx, paths=["/proj/work/nm"])
+    assert out["total_bytes"] == 0
+    assert "user preference" in out["excluded"][0]["reason"]
+
+
 def test_registry_exposes_only_readonly_tools() -> None:
     names = {t.name for t in TOOLS}
-    assert names == {"list_reclaimable", "get_project_facts", "estimate_plan"}
-    # No destructive capability is advertised to the model (docs/05 §Guardrails).
-    assert not any(bad in names for bad in ("delete", "apply", "run_shell", "propose_plan"))
+    assert names == {"list_reclaimable", "get_project_facts", "explain_unit", "estimate_plan"}
+    # No destructive/write capability is in the read-only registry (docs/05 §Guardrails);
+    # propose_plan / save_preference are added by the agent, not here.
+    assert not any(bad in names for bad in
+                   ("delete", "apply", "run_shell", "propose_plan", "save_preference"))

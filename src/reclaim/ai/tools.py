@@ -30,6 +30,7 @@ from typing import Any, Callable
 
 from reclaim.core.classifier import CONFIDENCE_THRESHOLD
 from reclaim.core.model import Candidate, Plan, ProjectFacts, ScanResult, Tier
+from reclaim.core.preferences import PreferenceStore
 from reclaim.humanize import human_bytes
 
 # How many rows `list_reclaimable` returns by default. Bounded so a huge scan can't blow the
@@ -51,19 +52,26 @@ class ToolError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class ToolContext:
-    """Immutable snapshot the tools read from: one classified scan + a planner-free view.
+    """Immutable snapshot the tools read from: one classified scan + saved preferences.
 
-    Held for the life of a chat turn. All three tools are pure functions of this context and
-    their arguments, which is what makes them testable with zero LLM/network."""
+    Held for the life of a chat turn. The tools are pure functions of this context and their
+    arguments, which is what makes them testable with zero LLM/network. `preferences` lets a
+    rule saved mid-session immediately hide/exclude matching paths, even though the in-memory
+    scan predates it (the gate re-checks at apply time regardless)."""
 
     scan: ScanResult
+    preferences: PreferenceStore | None = None
 
     @property
     def facts_by_root(self) -> dict[Path, ProjectFacts]:
         return {p.root: p for p in self.scan.projects}
 
-    def _facts_for_root(self, root: Path | None) -> ProjectFacts | None:
-        return self.facts_by_root.get(root) if root is not None else None
+    def user_protected(self, path: Path) -> str | None:
+        """A saved-preference reason protecting `path`, or None."""
+        if self.preferences is None:
+            return None
+        pref = self.preferences.matches(path)
+        return f"user preference: never touch {pref.pattern}" if pref is not None else None
 
 
 # --------------------------------------------------------------------------- #
@@ -125,6 +133,8 @@ def list_reclaimable(
     matched: list[tuple[Candidate, ProjectFacts | None]] = []
     for c in ctx.scan.candidates:
         if not c.is_reclaimable:                       # drops 🔴 (fail-safe)
+            continue
+        if ctx.user_protected(c.path) is not None:     # a saved rule hides it this session
             continue
         if kind is not None and c.kind != kind:
             continue
@@ -191,6 +201,40 @@ def _is_within(path: Path, root: Path) -> bool:
 
 
 # --------------------------------------------------------------------------- #
+# Tool: explain_unit
+# --------------------------------------------------------------------------- #
+
+def explain_unit(ctx: ToolContext, *, path: str) -> dict[str, Any]:
+    """Everything the engine knows about one unit — for a grounded "why is this safe?".
+
+    Bundles the unit's classifier verdict (tier, confidence, reason, rebuild command) with
+    its enclosing project's git-state/dormancy and any user-preference protection, so the
+    agent can explain the decision from facts alone rather than its own judgement."""
+    target = Path(path).expanduser()
+    cand = next((c for c in ctx.scan.candidates if c.path == target), None)
+    if cand is None:
+        return {"found": False, "path": str(target),
+                "message": "not a scanned unit; call list_reclaimable for known units"}
+
+    facts = ctx.facts_by_root.get(cand.project_root) if cand.project_root else None
+    protected = ctx.user_protected(cand.path)
+    return {
+        "found": True,
+        "path": str(cand.path),
+        "kind": cand.kind,
+        "size_bytes": cand.size_allocated,
+        "size_human": human_bytes(cand.size_allocated),
+        "tier": _TIER_NAME[cand.tier],
+        "reclaimable": cand.is_reclaimable and protected is None,
+        "confidence": round(cand.confidence, 2),
+        "reason": cand.reason,
+        "regen_command": cand.regen_command,
+        "user_protected": protected,
+        "project": _project_row(facts) if facts is not None else None,
+    }
+
+
+# --------------------------------------------------------------------------- #
 # Tool: estimate_plan
 # --------------------------------------------------------------------------- #
 
@@ -217,6 +261,10 @@ def select_paths(
         cand = by_path.get(key)
         if cand is None:
             not_found.append(raw)
+            continue
+        protected = ctx.user_protected(cand.path)
+        if protected is not None:                       # saved rule beats a stale green tier
+            excluded.append({"path": raw, "reason": protected})
         elif cand.is_reclaimable:
             selected.append(cand)
         else:
@@ -300,6 +348,16 @@ _FACTS_SCHEMA: dict[str, Any] = {
     "additionalProperties": False,
 }
 
+_EXPLAIN_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string",
+                 "description": "The exact unit path to explain (from list_reclaimable)."},
+    },
+    "required": ["path"],
+    "additionalProperties": False,
+}
+
 _ESTIMATE_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
@@ -332,6 +390,16 @@ TOOLS: tuple[Tool, ...] = (
         ),
         input_schema=_FACTS_SCHEMA,
         handler=get_project_facts,
+    ),
+    Tool(
+        name="explain_unit",
+        description=(
+            "Explain one unit in full: its tier and why, its rebuild command, the enclosing "
+            "project's git state and dormancy, and whether a user rule protects it. Read-only. "
+            "Use this to answer 'why is this safe (or not) to remove?'."
+        ),
+        input_schema=_EXPLAIN_SCHEMA,
+        handler=explain_unit,
     ),
     Tool(
         name="estimate_plan",
