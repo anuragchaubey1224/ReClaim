@@ -44,12 +44,18 @@ milestones: **1a** classification intelligence (read-only), **1b** reversible re
 > greedily by (safety, then size); apply is dry-run + confirm by default and fully undoable.
 > End-to-end scan→plan→gate→apply→undo verified byte-identical.
 
-## Phase 2 — The AI agent _(the differentiator)_
-- [ ] `reclaim chat` with grounded tool-calling (Claude API).
-- [ ] Read-only fact tools + `propose_plan` routed through the Safety Gate.
-- [ ] Natural-language goals → plans; "why is this safe?" explanations.
-- [ ] Preference memory (`never touch ~/work/**`).
-- **Exit criteria:** the demo paragraph in [`01-vision.md`](./01-vision.md) actually works.
+## Phase 2 — The AI agent _(the differentiator)_ ✅ **COMPLETE**
+Shipped in three milestones — **2a** tool layer + provider contract, **2b** grounded chat +
+agent loop, **2c** preference memory + explanations — plus bring-your-own-provider.
+- [x] `reclaim chat` with grounded tool-calling. _(2b — manual tool-use loop over the engine)_
+- [x] Read-only fact tools + `propose_plan` routed through the Safety Gate. _(2a/2b — the
+  agent can only read facts and *propose*; every removal re-validates at the gate.)_
+- [x] Natural-language goals → plans; "why is this safe?" explanations. _(2c — `explain_unit`)_
+- [x] Preference memory (`never touch ~/work/**`). _(2c — `reclaim protect`, enforced by the
+  deterministic engine at classify + apply time.)_
+- [x] **Bring your own provider** — Claude (default), OpenRouter, OpenAI, any OpenAI-compatible
+  endpoint, or a fully-local Ollama; the engine works fully with the agent absent (I7).
+- **Exit criteria:** ✅ the demo paragraph in [`01-vision.md`](./01-vision.md) works.
 
 ## Phase 3 — The ambient product _(polish & wow)_
 - [ ] Background daemon: watch disk growth, warn before the wall.
