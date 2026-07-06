@@ -31,6 +31,7 @@ from queue import Queue
 
 from reclaim.core.model import Candidate, ScanResult
 from reclaim.core.rules import is_reclaimable_unit
+from reclaim.humanize import human_bytes as _human
 from reclaim.platform import base as platform_base
 
 _SENTINEL = None  # pushed after join() to release idle workers
@@ -233,14 +234,6 @@ class Scanner:
 # Dependency-free runner:  python -m reclaim.core.scanner <path> [-w N]
 # Lets us benchmark against `du` without installing typer/rich.
 # --------------------------------------------------------------------------- #
-
-def _human(n: float) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
-
 
 def _main(argv: list[str]) -> int:
     import argparse
