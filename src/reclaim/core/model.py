@@ -5,8 +5,9 @@ raw `Candidate`s, the project analyzer produces `ProjectFacts`, and the classifi
 each candidate's `tier` / `confidence` / `reason` using that project context. Everything is
 frozen — stages produce *new* objects (via `dataclasses.replace`) rather than mutating.
 
-Phase 1a scope: the scan/classify half of the pipeline. The `Plan` / `Operation` half
-(quarantine + journal, ARCHITECTURE.md §5 lower rows) arrives in Phase 1b.
+The pipeline's two halves (ARCHITECTURE.md §5):
+  * scan/classify — `Candidate` + `ProjectFacts` (Phase 1a);
+  * plan/apply    — `Plan` = [`Operation`…], journaled to quarantine (Phase 1b, below).
 """
 
 from __future__ import annotations
@@ -162,3 +163,92 @@ class ScanResult:
             slot[0] += c.size_allocated
             slot[1] += 1
         return {t: (v[0], v[1]) for t, v in agg.items()}
+
+
+# --------------------------------------------------------------------------- #
+# Plan / apply half (Phase 1b) — the objects that flow through the Safety Gate,
+# Quarantine, and Journal (ARCHITECTURE.md §5 lower rows, §7.3–7.6).
+# --------------------------------------------------------------------------- #
+
+class OpState(str, Enum):
+    """Journal state machine for one reclaim transaction (ARCHITECTURE.md §7.4).
+
+    PLANNED → PREPARING → MOVING → COMMITTED → (TTL) → PURGED
+                                      │
+                                      ├─ (undo)  → RESTORED
+                                      └─ (crash) → ABORTED   (partial moves rolled back)
+    """
+
+    PLANNED = "planned"        # intent written; nothing moved yet
+    PREPARING = "preparing"    # quarantine slots created
+    MOVING = "moving"          # items being moved (each move journaled)
+    COMMITTED = "committed"    # all items quarantined; space freed, undoable
+    ABORTED = "aborted"        # rolled back — nothing remains quarantined (safe)
+    RESTORED = "restored"      # undo replayed — items back in place
+    PURGED = "purged"          # TTL expired — quarantine permanently deleted
+
+    @property
+    def is_terminal(self) -> bool:
+        """No recovery action needed for these on startup."""
+        return self in (OpState.COMMITTED, OpState.ABORTED,
+                        OpState.RESTORED, OpState.PURGED)
+
+
+@dataclass(frozen=True, slots=True)
+class Operation:
+    """One item to reclaim: move `source` into quarantine. Only green/yellow units become
+    Operations — the classifier's 🔴 verdict is enforced before a Plan is ever built, and
+    re-enforced by the Safety Gate at apply time (I5/I6)."""
+
+    source: Path
+    kind: str
+    size_allocated: int
+    file_count: int
+    tier: Tier
+    regen_command: str | None = None
+    project_root: Path | None = None
+
+    @classmethod
+    def from_candidate(cls, c: Candidate) -> Operation:
+        return cls(
+            source=c.path,
+            kind=c.kind,
+            size_allocated=c.size_allocated,
+            file_count=c.file_count,
+            tier=c.tier,
+            regen_command=c.regen_command,
+            project_root=c.project_root,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class Plan:
+    """A concrete, ordered set of Operations plus totals and human-readable risks. Both the
+    CLI and the AI produce a Plan; both funnel through the one Safety Gate (§4)."""
+
+    operations: tuple[Operation, ...]
+    risks: tuple[str, ...] = ()
+
+    @property
+    def total_bytes(self) -> int:
+        return sum(op.size_allocated for op in self.operations)
+
+    @property
+    def total_files(self) -> int:
+        return sum(op.file_count for op in self.operations)
+
+    @property
+    def is_empty(self) -> bool:
+        return not self.operations
+
+    @classmethod
+    def from_candidates(cls, candidates: tuple[Candidate, ...] | list[Candidate]) -> Plan:
+        """Build a plan from already-classified candidates, taking only reclaimable ones.
+
+        Fail-safe: 🔴 candidates are dropped here so a red item can never enter a Plan."""
+        ops = [Operation.from_candidate(c) for c in candidates if c.is_reclaimable]
+        risks: list[str] = []
+        costly = sum(1 for op in ops if op.tier is Tier.REGENERABLE_COSTLY)
+        if costly:
+            risks.append(f"{costly} costly item(s) — slow/expensive to rebuild")
+        return cls(operations=tuple(ops), risks=tuple(risks))
