@@ -24,6 +24,8 @@ import json
 import os
 import secrets
 import shutil
+import stat
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -243,7 +245,7 @@ class QuarantineStore:
         # Only reclaim the (now-empty) store when everything was moved back. If any item was
         # skipped, its quarantined copy must stay put — still recoverable.
         if not skipped:
-            shutil.rmtree(opdir / "store", ignore_errors=True)
+            _rmtree(opdir / "store")
         return RestoreResult(op_id, tuple(restored), tuple(skipped))
 
     # -- crash recovery (run at startup, §7.5) ---------------------------------
@@ -307,7 +309,7 @@ class QuarantineStore:
         for s in self.list_ops():
             if s.state is OpState.COMMITTED and s.age_days >= ttl_days:
                 opdir = self.ops_dir / s.op_id
-                shutil.rmtree(opdir / "store", ignore_errors=True)
+                _rmtree(opdir / "store")
                 self._journal(opdir).state(OpState.PURGED)
                 purged.append(s.op_id)
         return purged
@@ -333,8 +335,41 @@ class QuarantineStore:
             pass    # non-fatal: the journal is the source of truth, not this file
 
 
+def _force_writable_and_retry(func, path, _exc) -> None:
+    """`shutil.rmtree` error handler: clear the read-only bit, then retry the delete.
+
+    Windows marks many package/cache files read-only (npm, pip wheels, `.git` objects), and
+    `shutil.rmtree` raises PermissionError on them. Clearing the bit on the failing path *and
+    its parent* (owner-write is added on POSIX, the read-only attribute is cleared on Windows)
+    lets the retry succeed. A file that is still undeletable is swallowed rather than crashing
+    a purge — the worst case is leftover bytes, never a crash."""
+    for p in (os.path.dirname(path), path):
+        try:
+            os.chmod(p, os.stat(p).st_mode | stat.S_IWRITE)
+        except OSError:
+            pass
+    try:
+        func(path)
+    except OSError:
+        pass
+
+
+def _rmtree(path: Path) -> None:
+    """Recursively delete a tree, surviving read-only files (Windows). No-op cost on POSIX."""
+    if not path.exists():
+        return
+    if sys.version_info >= (3, 12):
+        shutil.rmtree(path, onexc=_force_writable_and_retry)
+    else:                                   # onexc was added in 3.12; onerror before that
+        shutil.rmtree(path, onerror=_force_writable_and_retry)
+
+
 def _remove(path: Path) -> None:
     if path.is_dir() and not path.is_symlink():
-        shutil.rmtree(path)
+        _rmtree(path)
     else:
+        try:
+            os.chmod(path, os.stat(path).st_mode | stat.S_IWRITE)
+        except OSError:
+            pass
         path.unlink(missing_ok=True)

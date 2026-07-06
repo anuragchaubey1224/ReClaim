@@ -14,6 +14,7 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
+import stat
 from pathlib import Path
 
 import pytest
@@ -230,3 +231,29 @@ def test_purge_after_ttl(tmp_path: Path) -> None:
     from reclaim.core.journal import Journal
     assert Journal(store.ops_dir / tx.op_id / "journal.jsonl").last_state() \
         is OpState.PURGED
+
+
+# -- purge survives read-only files (the Windows read-only attribute) ----------
+
+def test_purge_survives_readonly_tree(tmp_path: Path) -> None:
+    """Windows marks many npm/pip/.git files read-only, which makes a naive `rmtree` raise
+    PermissionError — so a purge would crash or (with ignore_errors) silently leave the bytes
+    on disk. Purge must still truly free the store. Reproduced on POSIX by making the
+    quarantined tree non-writable (there deletion is gated by each parent dir's write bit)."""
+    unit = _make_unit(tmp_path)
+    clock = _Clock()
+    store = _store(tmp_path, clock=clock)
+    tx = store.apply(Plan((_op(unit),)))
+
+    quarantined = store.ops_dir / tx.op_id / "store"
+    for root, dirs, files in os.walk(quarantined):     # lock every file + dir in the tree
+        for f in files:
+            os.chmod(os.path.join(root, f), stat.S_IREAD)
+        for d in dirs:
+            os.chmod(os.path.join(root, d), 0o500)     # r-x: blocks deleting its children
+
+    clock.advance(8 * 86400)
+    purged = store.purge(ttl_days=7)
+
+    assert purged == [tx.op_id]
+    assert not quarantined.exists()      # freed despite the read-only tree (not just claimed)
