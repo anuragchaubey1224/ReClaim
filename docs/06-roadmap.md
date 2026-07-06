@@ -14,14 +14,23 @@ Prove the risky part early. **Language decided: Python** (see [`04-technical-dep
 - **Exit criteria:** ✅ scans the home/projects dir fast and prints total reclaimable bytes.
 
 ## Phase 1 — The engine (MVP) _(the core project)_
-This alone is a legitimate, strong portfolio project.
-- [ ] Concurrent scanner with pruning + correct sizing.
-- [ ] Three-tier rule-based classifier for the common artifacts.
-- [ ] Project analyzer: root detection, type, **git-state**, activity.
-- [ ] `reclaim scan` / `reclaim status` with a clean grouped report.
-- [ ] Quarantine store + write-ahead journal + `reclaim apply` / `reclaim undo`.
-- [ ] Tests for the safety invariants (never touches 🔴, undo restores exactly).
+This alone is a legitimate, strong portfolio project. Split into three demoable
+milestones: **1a** classification intelligence (read-only), **1b** reversible removal core
+(journal + quarantine + safety gate), **1c** the CLI reclaim loop (planner + apply/undo).
+
+- [x] Concurrent scanner with pruning + correct sizing. _(Phase 0)_
+- [x] Three-tier rule-based classifier for the common artifacts. _(1a — safety lattice)_
+- [x] Project analyzer: root detection, type, **git-state**, activity. _(1a — defensive git,
+  mtime dormancy)_
+- [x] `reclaim scan` / `reclaim status` with a clean grouped report. _(1a — tiered report +
+  per-project fact sheets)_
+- [ ] Quarantine store + write-ahead journal + `reclaim apply` / `reclaim undo`. _(1b + 1c)_
+- [~] Tests for the safety invariants. _(1a: git-WIP hard-protect, unknown⇒🔴, protect-paths
+  win — 29 tests green; undo-restores-exactly lands in 1b.)_
 - **Exit criteria:** a stranger can safely reclaim space with it, no AI involved.
+
+> **1a status (done):** `reclaim status` classifies a real 290K-file tree in ~3.4 s into
+> 🟢/🟡/🔴 with git-state and dormancy per project; nothing is ever removed (read-only).
 
 ## Phase 2 — The AI agent _(the differentiator)_
 - [ ] `reclaim chat` with grounded tool-calling (Claude API).
