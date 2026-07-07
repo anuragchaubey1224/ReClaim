@@ -2,8 +2,9 @@
 
 Reclaim reads an **optional** TOML config that *extends* its built-in rules. You never need
 it — the engine ships with sensible defaults and works with no config at all. The config lets
-you teach Reclaim about **custom reclaimable units** (build dirs it doesn't know yet) and
-**custom protections** (paths it must never touch), tuned to your own machine.
+you teach Reclaim about **custom reclaimable units** (build dirs it doesn't know yet),
+**custom protections** (paths it must never touch), and **[watch settings](#watch-settings)**
+(defaults for the `reclaim watch` disk monitor), tuned to your own machine.
 
 - **Location:** `$RECLAIM_HOME/config.toml` — by default `~/.reclaim/config.toml`
   (`%USERPROFILE%\.reclaim\config.toml` on Windows).
@@ -65,6 +66,26 @@ files = ["*.pcap", "*.hdf5"]              # file-basename globs to always protec
 basename against a glob. (For protecting one **specific path** — "never touch `~/work/**`" —
 use `reclaim protect <glob>` instead; that's the [preference memory](./05-ai-agent-design.md),
 a separate, path-specific mechanism.)
+
+### Watch settings
+
+Defaults for the `reclaim watch` disk monitor (Phase 3c). Every field is optional, and any CLI
+flag (`--min-free`, `--interval`, `--warn-growth`, or a path argument) overrides the config.
+
+```toml
+[watch]
+roots    = ["~/dev", "~/work"]   # paths to watch (default: your home)
+min_free = "10G"                 # warn when free space drops below this ("10G" or "10%")
+interval = "6h"                  # how often to check when running `reclaim watch`
+growth   = "2G"                  # warn if reclaimable clutter grows by this since the last check
+```
+
+| Field | Meaning |
+|-------|---------|
+| `roots` | Directories to watch. Defaults to your home directory. |
+| `min_free` | Low-space threshold — an absolute size (`10G`) or a percentage of the volume (`10%`). Below it warns; below half of it is critical. |
+| `interval` | Check cadence for the foreground `reclaim watch` loop (e.g. `6h`, `30m`). Ignored for `--once`. |
+| `growth` | Warn when reclaimable clutter grows by at least this much between checks. Omit to disable growth alerts. |
 
 ## Safety guarantees
 

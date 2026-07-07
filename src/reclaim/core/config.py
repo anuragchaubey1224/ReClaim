@@ -51,8 +51,24 @@ _TIER_ALIASES: dict[str, Tier] = {
 
 
 @dataclass(frozen=True, slots=True)
+class WatchConfig:
+    """Persistent settings for the `reclaim watch` monitor (Phase 3c), all optional.
+
+    `None` means "unset" so a CLI flag can override the config; the CLI supplies the defaults."""
+
+    roots: tuple[str, ...] = ()
+    min_free: str | None = None       # "10G" or "10%"
+    interval: str | None = None       # "6h", "30m"
+    growth: str | None = None         # "2G": warn if reclaimable grows by this since last check
+
+    @property
+    def is_empty(self) -> bool:
+        return not (self.roots or self.min_free or self.interval or self.growth)
+
+
+@dataclass(frozen=True, slots=True)
 class ReclaimConfig:
-    """Parsed user config: custom units + protections, plus any warnings from parsing.
+    """Parsed user config: custom units + protections + watch settings, plus parse warnings.
 
     `warnings` are human-readable strings the CLI surfaces so a typo is visible rather than
     silently ignored. An empty config (no file, or a file with nothing usable) is the common
@@ -61,10 +77,13 @@ class ReclaimConfig:
     units: tuple[tuple[str, UnitRule], ...] = ()      # (basename, rule), first-wins on dupes
     protect_dirs: frozenset[str] = field(default=frozenset())
     protect_file_globs: tuple[str, ...] = ()
+    watch: WatchConfig = field(default_factory=WatchConfig)
     warnings: tuple[str, ...] = ()
 
     @property
     def is_empty(self) -> bool:
+        """True when nothing that affects the *ruleset* is set (watch settings don't count —
+        they don't change classification). Used to short-circuit `build_ruleset`."""
         return not (self.units or self.protect_dirs or self.protect_file_globs)
 
 
@@ -122,8 +141,35 @@ def _parse(data: dict) -> ReclaimConfig:
         units=tuple(units),
         protect_dirs=frozenset(protect_dirs),
         protect_file_globs=tuple(protect_globs),
+        watch=_parse_watch(data.get("watch"), warnings),
         warnings=tuple(warnings),
     )
+
+
+def _parse_watch(value: object, warnings: list[str]) -> WatchConfig:
+    """Parse the optional `[watch]` table. Unknown/typed-wrong values warn and fall back."""
+    if value is None:
+        return WatchConfig()
+    if not isinstance(value, dict):
+        warnings.append("[watch] must be a table — ignoring it")
+        return WatchConfig()
+    roots = _str_list(value.get("roots"), "watch.roots", warnings)
+    return WatchConfig(
+        roots=tuple(roots),
+        min_free=_opt_str(value.get("min_free"), "watch.min_free", warnings),
+        interval=_opt_str(value.get("interval"), "watch.interval", warnings),
+        growth=_opt_str(value.get("growth"), "watch.growth", warnings),
+    )
+
+
+def _opt_str(value: object, where: str, warnings: list[str]) -> str | None:
+    """A present-and-non-empty string, else None (warning if present but the wrong type)."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value.strip()
+    warnings.append(f"{where} must be a non-empty string — ignoring it")
+    return None
 
 
 def _parse_unit(entry: object, warnings: list[str]) -> tuple[str, UnitRule] | None:

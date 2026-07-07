@@ -69,7 +69,11 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
 - [x] **Trends / history** ("node_modules grew 3 GB this month"). _(3b — every read-only scan
   appends a compact snapshot to `$RECLAIM_HOME/history.jsonl`; `reclaim trends [--since 7d|2w|3m]`
   reports the per-kind change since a baseline, `reclaim history` lists the raw snapshots.)_
-- [ ] Background daemon: watch disk growth, warn before the wall.
+- [x] **Background daemon: watch disk growth, warn before the wall.** _(3c — `reclaim watch`
+  monitors free space + reclaimable-clutter growth per root and alerts *before* the wall, with
+  the "here's how much you'd get back" fix. `--once` for cron/launchd/Task Scheduler or a
+  foreground loop; native desktop notifications + `watch.log`; thresholds via flags or a
+  `[watch]` config section.)_
 - [ ] TUI dashboard.
 
 > **3e (done):** `reclaim` installs as a single CLI (`pipx install .` verified end-to-end —
@@ -82,6 +86,12 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
 > picks the most recent baseline at least the look-back window old (falling back to the earliest
 > snapshot) and shows signed per-kind deltas. Recording is on scan/status only; opt out with
 > `RECLAIM_NO_HISTORY`. +24 tests → **195 total.**
+>
+> **3c (done):** a pure `evaluate()` decision core (disk usage + reclaimable now/before →
+> alerts) with all I/O injected, wrapped by `Monitor.check()` and a thin `reclaim watch` loop.
+> Each check also records a history snapshot, so watch feeds trends. Notifications degrade
+> gracefully (native → console → `watch.log`); nothing here ever deletes. +24 tests →
+> **219 total.**
 
 > **3a (done):** a `Ruleset` bundles the built-in + user-config rules and flows through the
 > whole pipeline, so a custom unit is recognized like `node_modules` and a custom protection is

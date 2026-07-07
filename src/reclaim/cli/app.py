@@ -15,7 +15,11 @@ file only parses args, renders, and confirms.
 
 from __future__ import annotations
 
+import json
 import os
+import subprocess
+import sys
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
@@ -30,6 +34,8 @@ from reclaim.core.classifier import classify_scan
 from reclaim.core.config import ReclaimConfig, build_ruleset, load_config
 from reclaim.core.history import HistoryStore, Trend, parse_since
 from reclaim.core.model import OpState, Plan, ScanResult, Tier
+from reclaim.core.monitor import (Alert, CheckResult, Monitor, Thresholds,
+                                  parse_interval, resolve_min_free)
 from reclaim.core.planner import Planner, PlanGoal, PlanResult, parse_size
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore, UndoError
@@ -662,6 +668,15 @@ _STARTER_CONFIG = """\
 # [protect]
 # dirs  = ["research-data", "recordings"]   # directory basenames to always protect
 # files = ["*.pcap", "*.hdf5"]              # file-basename globs to always protect
+
+# ── Background watch (reclaim watch) ────────────────────────────────────────
+# Default roots + thresholds for the disk monitor. CLI flags override these.
+
+# [watch]
+# roots    = ["~/dev", "~/work"]   # paths to watch (default: your home)
+# min_free = "10G"                 # warn when free space drops below this ("10G" or "10%")
+# interval = "6h"                  # how often to check when running `reclaim watch`
+# growth   = "2G"                  # warn if reclaimable clutter grows by this since last check
 """
 
 
@@ -690,7 +705,7 @@ def config(
     console.print(f"[dim]config file:[/] {path} {found}")
     for w in cfg.warnings:
         console.print(f"[yellow]⚠ {w}[/]")
-    if cfg.is_empty:
+    if cfg.is_empty and cfg.watch.is_empty:
         if not cfg.warnings:
             console.print("[dim]no custom rules. scaffold one with "
                           "[bold]reclaim config --init[/].[/]")
@@ -713,6 +728,16 @@ def config(
             console.print("  dirs:  " + ", ".join(sorted(cfg.protect_dirs)))
         if cfg.protect_file_globs:
             console.print("  files: " + ", ".join(cfg.protect_file_globs))
+
+    if not cfg.watch.is_empty:
+        w = cfg.watch
+        console.print("\n[bold]Watch[/] [dim](reclaim watch)[/]")
+        if w.roots:
+            console.print("  roots:    " + ", ".join(w.roots))
+        for label, val in (("min-free", w.min_free), ("interval", w.interval),
+                           ("growth", w.growth)):
+            if val:
+                console.print(f"  {label}: {val}")
 
 
 # --------------------------------------------------------------------------- #
@@ -819,6 +844,145 @@ def history_cmd(
                 f"{s.file_count:,}"]
         table.add_row(*row)
     console.print(table)
+
+
+# --------------------------------------------------------------------------- #
+# Watch — background disk monitor, "warn before the wall" (Phase 3c)
+# --------------------------------------------------------------------------- #
+
+_ALERT_META = {"critical": ("🔴", "red"), "warning": ("🟡", "yellow"), "info": ("🔵", "cyan")}
+
+
+def _watch_log(alert: Alert) -> None:
+    """Append an alert to `$RECLAIM_HOME/watch.log`. Best-effort — never breaks the loop."""
+    try:
+        path = _reclaim_home() / "watch.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        with path.open("a", encoding="utf-8") as f:
+            f.write(f"{stamp} [{alert.level.value}] {alert.title}: {alert.detail}\n")
+    except OSError:
+        pass
+
+
+def _native_notify(alert: Alert) -> None:
+    """Best-effort OS desktop notification. Any failure is swallowed (it's a nicety)."""
+    title, msg = f"Reclaim: {alert.title}", alert.detail
+    try:
+        if sys.platform == "darwin":
+            body, head = json.dumps(msg), json.dumps(title)
+            subprocess.run(
+                ["osascript", "-e", f"display notification {body} with title {head}"],
+                capture_output=True, timeout=5, check=False,
+            )
+        elif sys.platform.startswith("linux"):
+            subprocess.run(["notify-send", title, msg],
+                           capture_output=True, timeout=5, check=False)
+        # Windows has no reliable stdlib path — the console + watch.log carry the alert.
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _notify(alert: Alert, *, native: bool) -> None:
+    icon, style = _ALERT_META.get(alert.level.value, ("•", "white"))
+    console.print(f"[{style}]{icon} {alert.title}[/] — {alert.detail}")
+    _watch_log(alert)
+    if native:
+        _native_notify(alert)
+
+
+def _watch_tick(monitor: Monitor, *, native: bool) -> CheckResult:
+    """One monitor pass: alert on anything actionable, else print a reassuring liveness line."""
+    result = monitor.check()
+    if result.alerts:
+        for alert in result.alerts:
+            _notify(alert, native=native)
+    else:
+        for root, disk, reclaimable in result.measured:
+            console.print(
+                f"[green]✓[/] {_short_path(Path(root))} — "
+                f"[bold]{human_bytes(disk.free)}[/] free · "
+                f"{human_bytes(reclaimable)} reclaimable"
+            )
+    return result
+
+
+@app.command()
+def watch(
+    path: Optional[Path] = typer.Argument(None, help="Path(s) to watch (default: config or home)"),
+    once: bool = typer.Option(False, "--once",
+                              help="Run a single check and exit (for cron / launchd / Task Scheduler)"),
+    interval: Optional[str] = typer.Option(None, "--interval",
+                                           help="Check every e.g. 6h, 30m (default 6h)"),
+    min_free: Optional[str] = typer.Option(None, "--min-free",
+                                           help="Warn when free space drops below e.g. 10G or 10%"),
+    warn_growth: Optional[str] = typer.Option(None, "--warn-growth",
+                                              help="Warn if reclaimable grew by e.g. 2G since last check"),
+    no_notify: bool = typer.Option(False, "--no-notify",
+                                   help="Don't send OS desktop notifications (console + log only)"),
+    workers: Optional[int] = _WORKERS_OPT,
+    context_sensitive: bool = _CS_OPT,
+) -> None:
+    """Watch disk space + reclaimable growth and warn before you hit the wall.
+
+    Runs `--once` (ideal under cron/launchd/Task Scheduler) or as a foreground loop you leave
+    running. Thresholds and roots come from CLI flags, then the `[watch]` section of your
+    config, then defaults. Each check also records a history snapshot, so `reclaim watch` feeds
+    `reclaim trends` too."""
+    cfg = _config()
+    for w in cfg.warnings:
+        err.print(f"[yellow]config:[/] {w}")
+    ruleset = build_ruleset(cfg)
+    wcfg = cfg.watch
+
+    # Resolve roots + thresholds: CLI flag > config > default.
+    if path is not None:
+        roots = [_resolve_path(path)]
+    elif wcfg.roots:
+        roots = [Path(r).expanduser() for r in wcfg.roots]
+    else:
+        roots = [Path.home()]
+
+    min_free_eff = min_free or wcfg.min_free or "10%"
+    interval_eff = interval or wcfg.interval or "6h"
+    growth_eff = warn_growth or wcfg.growth
+
+    try:
+        interval_seconds = parse_interval(interval_eff)
+        resolve_min_free(min_free_eff, 100)            # validate format early
+        if growth_eff is not None:
+            parse_size(growth_eff)
+    except ValueError as e:
+        err.print(f"[red]error:[/] {e}")
+        raise typer.Exit(2) from e
+
+    history = None if os.environ.get("RECLAIM_NO_HISTORY") else _history()
+
+    def measure(root: Path) -> ScanResult:
+        raw = Scanner(workers=workers, include_context_sensitive=context_sensitive,
+                      ruleset=ruleset).scan(root)
+        return classify_scan(raw, preferences=_prefs(), ruleset=ruleset)
+
+    monitor = Monitor(roots, Thresholds(min_free=min_free_eff, growth=growth_eff),
+                      measure=measure, history=history)
+    native = not (no_notify or os.environ.get("RECLAIM_NO_NOTIFY"))
+
+    if once:
+        _watch_tick(monitor, native=native)
+        return
+
+    console.print(
+        f"[dim]watching {len(roots)} path(s) every {interval_eff} "
+        f"(free < {min_free_eff}"
+        + (f", growth ≥ {growth_eff}" if growth_eff else "")
+        + ") · Ctrl-C to stop[/]"
+    )
+    try:
+        while True:
+            _watch_tick(monitor, native=native)
+            time.sleep(interval_seconds)
+    except KeyboardInterrupt:
+        console.print("\n[dim]stopped.[/]")
 
 
 if __name__ == "__main__":
