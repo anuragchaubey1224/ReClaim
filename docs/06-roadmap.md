@@ -58,11 +58,20 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
 - **Exit criteria:** ✅ the demo paragraph in [`01-vision.md`](./01-vision.md) works.
 
 ## Phase 3 — The ambient product _(polish & wow)_
+- [x] **User config file for custom rules/protections.** _(3a — `~/.reclaim/config.toml`:
+  custom reclaimable units + protections, folded into a `Ruleset` threaded through
+  scan → classify → gate. Fail-safe parsing; protections always win. `reclaim config` /
+  `--init`. See [`config-reference.md`](./config-reference.md).)_
 - [ ] Background daemon: watch disk growth, warn before the wall.
 - [ ] Trends ("Docker grew 12 GB this month").
 - [ ] TUI dashboard.
-- [ ] User config file for custom rules/protections.
 - [ ] `brew install` / one-line installer, real README, demo GIF.
+
+> **3a (done):** a `Ruleset` bundles the built-in + user-config rules and flows through the
+> whole pipeline, so a custom unit is recognized like `node_modules` and a custom protection is
+> enforced at classify time *and* re-enforced at the Safety Gate (I6). Config can only ever
+> *add* protection — a name that's both a unit and a protection stays protected (I2). Broken
+> config degrades to the built-ins with a visible warning, never a crash. +24 tests.
 
 ---
 

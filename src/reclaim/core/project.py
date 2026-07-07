@@ -74,10 +74,15 @@ class ProjectAnalyzer:
         *,
         now: float | None = None,
         run_git: GitRunner | None = None,
+        activity_skip: frozenset[str] | None = None,
     ) -> None:
         self._now = now                       # None ⇒ live clock (deterministic in tests)
         self._run_git = run_git or _run_git
         self._facts: dict[Path, ProjectFacts] = {}
+        # Dir basenames not descended into when measuring activity. Defaults to the built-in
+        # reclaimable units + `.git`; the classifier passes the config-extended set so custom
+        # build dirs are skipped too (their mtimes reflect builds, not the developer's work).
+        self._activity_skip = activity_skip if activity_skip is not None else _ACTIVITY_SKIP
 
     # -- root & type -----------------------------------------------------------
 
@@ -189,7 +194,7 @@ class ProjectAnalyzer:
                             if entry.is_symlink():
                                 continue
                             if entry.is_dir(follow_symlinks=False):
-                                if entry.name not in _ACTIVITY_SKIP:
+                                if entry.name not in self._activity_skip:
                                     stack.append(entry.path)
                                 continue        # never count a dir's mtime
                             st = entry.stat(follow_symlinks=False)

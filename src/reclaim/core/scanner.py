@@ -30,7 +30,7 @@ from pathlib import Path
 from queue import Queue
 
 from reclaim.core.model import Candidate, ScanResult
-from reclaim.core.rules import is_reclaimable_unit
+from reclaim.core.rules import DEFAULT_RULESET, Ruleset
 from reclaim.humanize import human_bytes as _human
 from reclaim.platform import base as platform_base
 
@@ -61,12 +61,15 @@ class Scanner:
         platform: platform_base.Platform | None = None,
         workers: int | None = None,
         include_context_sensitive: bool = False,
+        ruleset: Ruleset | None = None,
     ) -> None:
         self.platform = platform or platform_base.detect()
         cpu = os.cpu_count() or 4
         # I/O-bound: oversubscribe cores because workers spend most time in syscalls.
         self.workers = workers or min(32, cpu * 4)
         self.include_context_sensitive = include_context_sensitive
+        # The active recognition rules (built-ins by default, extended by user config).
+        self.ruleset = ruleset if ruleset is not None else DEFAULT_RULESET
 
     def scan(self, *roots: os.PathLike[str] | str) -> ScanResult:
         root_paths = tuple(Path(r).expanduser() for r in roots)
@@ -122,7 +125,7 @@ class Scanner:
                     if entry.is_symlink():
                         continue     # never follow: avoids cycles + double counting
                     if entry.is_dir(follow_symlinks=False):
-                        rule = is_reclaimable_unit(
+                        rule = self.ruleset.is_reclaimable_unit(
                             entry.name, self.include_context_sensitive
                         )
                         if rule is not None:

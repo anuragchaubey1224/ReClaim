@@ -13,12 +13,18 @@ Two rule sets, both pure data (docs/04 §4 — "a declarative ruleset, not code"
     safety lattice (ARCHITECTURE.md §7.2): protections win over everything. Used by the
     project analyzer to list a project's protected paths and by the classifier as its
     fail-safe top layer.
+
+Both sets are the *built-in* defaults. A `Ruleset` bundles them so the user's `config.toml`
+(Phase 3a — see `core/config.py`) can extend them with custom units and protections; the
+built-in `DEFAULT_RULESET` is used everywhere no user config is threaded in, and the
+module-level `is_reclaimable_unit` / `protect_reason` delegate to it (back-compat).
 """
 
 from __future__ import annotations
 
 import fnmatch
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
+from typing import Mapping
 
 from reclaim.core.model import Tier
 
@@ -61,18 +67,6 @@ CONTEXT_SENSITIVE_UNITS: dict[str, UnitRule] = {
 }
 
 
-def is_reclaimable_unit(
-    name: str, include_context_sensitive: bool = False
-) -> UnitRule | None:
-    """Return the UnitRule if `name` is a known reclaimable directory, else None."""
-    hit = RECLAIMABLE_UNITS.get(name)
-    if hit is not None:
-        return hit
-    if include_context_sensitive:
-        return CONTEXT_SENSITIVE_UNITS.get(name)
-    return None
-
-
 # --------------------------------------------------------------------------- #
 # Protect patterns — the 🔴 top of the safety lattice (docs/03 §2.4).
 # A path matching any of these is irreplaceable and must never be reclaimed.
@@ -98,17 +92,120 @@ def _matches_any(name: str, globs: tuple[str, ...]) -> bool:
     return any(fnmatch.fnmatch(name, g) for g in globs)
 
 
-def protect_reason(name: str, is_dir: bool) -> str | None:
-    """If a basename is protected, return a human reason; else None.
+# --------------------------------------------------------------------------- #
+# Ruleset — the built-in rules, extensible by user config (Phase 3a).
+# --------------------------------------------------------------------------- #
 
-    Deterministic and fail-safe: used as the lattice's top layer so protections win over
-    any reclaimable-unit match (ARCHITECTURE.md §7.2)."""
-    if is_dir:
-        if name in PROTECT_DIR_NAMES:
-            return f"'{name}/' conventionally holds irreplaceable data"
+@dataclass(frozen=True, slots=True)
+class Ruleset:
+    """The active recognition + protection rules: built-ins merged with any user config.
+
+    Everything the scanner/classifier/gate need to decide "reclaimable unit?" and "protected?"
+    lives here, so one object flows through the whole pipeline. `DEFAULT_RULESET` holds just
+    the built-ins; `extended()` returns a *new* ruleset with a user's custom units and
+    protections folded in. Immutable — extensions never mutate a shared ruleset.
+
+    Safety invariant preserved by construction (I2): a protected directory name can never be a
+    reclaimable unit. `extended()` drops any unit whose name is (or becomes) a protected dir,
+    so config can only ever add protection, never unlock something the built-ins guard."""
+
+    reclaimable_units: Mapping[str, UnitRule]
+    context_sensitive_units: Mapping[str, UnitRule]
+    protect_dir_names: frozenset[str]          # built-in "conventionally holds data" dirs
+    protect_secret_globs: tuple[str, ...]
+    protect_data_globs: tuple[str, ...]
+    protect_custom_dirs: frozenset[str] = field(default=frozenset())      # from user config
+    protect_custom_file_globs: tuple[str, ...] = field(default=())        # from user config
+
+    def is_reclaimable_unit(
+        self, name: str, include_context_sensitive: bool = False
+    ) -> UnitRule | None:
+        """Return the UnitRule if `name` is a known reclaimable directory, else None."""
+        hit = self.reclaimable_units.get(name)
+        if hit is not None:
+            return hit
+        if include_context_sensitive:
+            return self.context_sensitive_units.get(name)
         return None
-    if _matches_any(name, PROTECT_SECRET_GLOBS):
-        return "secret-bearing file"
-    if _matches_any(name, PROTECT_DATA_GLOBS):
-        return "local database / data file"
-    return None
+
+    def protect_reason(self, name: str, is_dir: bool) -> str | None:
+        """If a basename is protected, return a human reason; else None.
+
+        Deterministic and fail-safe: the lattice's top layer, so protections win over any
+        reclaimable-unit match (ARCHITECTURE.md §7.2). Custom (user-config) protections are
+        reported with a distinct reason so the user recognizes their own rule."""
+        if is_dir:
+            if name in self.protect_custom_dirs:
+                return f"'{name}/' is protected by your config"
+            if name in self.protect_dir_names:
+                return f"'{name}/' conventionally holds irreplaceable data"
+            return None
+        if _matches_any(name, self.protect_secret_globs):
+            return "secret-bearing file"
+        if _matches_any(name, self.protect_data_globs):
+            return "local database / data file"
+        if _matches_any(name, self.protect_custom_file_globs):
+            return "matches a protected pattern in your config"
+        return None
+
+    def activity_skip_names(self) -> frozenset[str]:
+        """Directory basenames whose mtimes should not count as project activity: every
+        reclaimable unit (their mtimes reflect builds, not the developer's work) plus `.git`.
+        Custom units are included so a user's build dir doesn't mask dormancy."""
+        return frozenset(self.reclaimable_units) | {".git"}
+
+    def extended(
+        self,
+        *,
+        units: Mapping[str, UnitRule] | tuple[tuple[str, UnitRule], ...] = (),
+        protect_dirs: frozenset[str] | tuple[str, ...] = (),
+        protect_file_globs: tuple[str, ...] = (),
+    ) -> "Ruleset":
+        """Return a new Ruleset with user rules folded in (built-ins untouched).
+
+        Protections always win (I2): a unit whose name is any protected dir — built-in,
+        already-custom, or newly added here — is not registered, and any *built-in* unit that
+        the new protections now cover is removed. So a user can shadow a built-in unit's regen
+        command, but can never make a protected name reclaimable."""
+        new_dirs = frozenset(protect_dirs)
+        all_protected = self.protect_dir_names | self.protect_custom_dirs | new_dirs
+        merged: dict[str, UnitRule] = {
+            name: rule for name, rule in self.reclaimable_units.items()
+            if name not in new_dirs               # a new protection removes a built-in unit
+        }
+        for name, rule in dict(units).items():
+            if name in all_protected:
+                continue                          # never register a protected name as a unit
+            merged[name] = rule
+        return replace(
+            self,
+            reclaimable_units=merged,
+            protect_custom_dirs=self.protect_custom_dirs | new_dirs,
+            protect_custom_file_globs=self.protect_custom_file_globs + tuple(protect_file_globs),
+        )
+
+
+# The built-in ruleset: what Reclaim uses when no user config extends it.
+DEFAULT_RULESET = Ruleset(
+    reclaimable_units=RECLAIMABLE_UNITS,
+    context_sensitive_units=CONTEXT_SENSITIVE_UNITS,
+    protect_dir_names=PROTECT_DIR_NAMES,
+    protect_secret_globs=PROTECT_SECRET_GLOBS,
+    protect_data_globs=PROTECT_DATA_GLOBS,
+)
+
+
+def is_reclaimable_unit(
+    name: str, include_context_sensitive: bool = False
+) -> UnitRule | None:
+    """Return the UnitRule if `name` is a built-in reclaimable directory, else None.
+
+    Delegates to `DEFAULT_RULESET`; callers that honor user config use a `Ruleset` instance."""
+    return DEFAULT_RULESET.is_reclaimable_unit(name, include_context_sensitive)
+
+
+def protect_reason(name: str, is_dir: bool) -> str | None:
+    """If a basename is protected by the *built-in* rules, return a human reason; else None.
+
+    Delegates to `DEFAULT_RULESET`; callers that honor user config use a `Ruleset` instance."""
+    return DEFAULT_RULESET.protect_reason(name, is_dir)

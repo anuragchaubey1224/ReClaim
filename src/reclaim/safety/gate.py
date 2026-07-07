@@ -23,7 +23,7 @@ from reclaim.core.classifier import classify
 from reclaim.core.model import Candidate, Operation, Plan
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.project import ProjectAnalyzer
-from reclaim.core.rules import is_reclaimable_unit, protect_reason
+from reclaim.core.rules import DEFAULT_RULESET, Ruleset
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,6 +53,7 @@ class SafetyGate:
         self,
         analyzer_factory: Callable[[], ProjectAnalyzer] | None = None,
         preferences: PreferenceStore | None = None,
+        ruleset: Ruleset | None = None,
     ) -> None:
         # A FRESH analyzer per validate() → git/activity are re-read, never served from a
         # plan-time cache. Injectable so tests can drive the git state deterministically.
@@ -60,6 +61,9 @@ class SafetyGate:
         # User protection rules, re-read at apply time — a rule added after planning still
         # blocks removal here (defense in depth with the classifier's scan-time check).
         self._preferences = preferences
+        # The active ruleset (built-ins by default). Re-checking protections/units here with
+        # the *same* config the plan used keeps a custom protection enforced at apply time.
+        self._ruleset = ruleset if ruleset is not None else DEFAULT_RULESET
 
     def validate(self, plan: Plan) -> GateResult:
         analyzer = self._analyzer_factory()
@@ -87,12 +91,12 @@ class SafetyGate:
                 return f"user preference: never touch {pref.pattern}"
 
         # 2. Protected path — never reclaim a secret/data path (defensive top of lattice).
-        pr = protect_reason(src.name, is_dir=True)
+        pr = self._ruleset.protect_reason(src.name, is_dir=True)
         if pr is not None:
             return pr
 
         # 3. Still a recognized reclaimable unit — guards against a malformed/tampered plan.
-        if is_reclaimable_unit(src.name, include_context_sensitive=True) is None:
+        if self._ruleset.is_reclaimable_unit(src.name, include_context_sensitive=True) is None:
             return f"'{src.name}' is not a known reclaimable unit"
 
         # 4. Re-classify with a fresh read: if the enclosing project went dirty/unpushed (or
@@ -103,7 +107,7 @@ class SafetyGate:
             size_apparent=0, file_count=op.file_count, tier=op.tier,
             regen_command=op.regen_command,
         )
-        verdict = classify(cand, facts)
+        verdict = classify(cand, facts, ruleset=self._ruleset)
         if not verdict.is_reclaimable:
             return verdict.reason or "reclassified as protected"
         return None

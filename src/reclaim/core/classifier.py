@@ -24,7 +24,7 @@ from dataclasses import replace
 from reclaim.core.model import Candidate, ProjectFacts, ScanResult, Tier
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.project import ProjectAnalyzer
-from reclaim.core.rules import protect_reason
+from reclaim.core.rules import DEFAULT_RULESET, Ruleset
 
 # Below this, a green/yellow candidate is "low confidence" — surfaced but not auto-selected
 # by the planner without an explicit opt-in.
@@ -35,8 +35,10 @@ def classify(
     candidate: Candidate,
     project: ProjectFacts | None,
     preferences: PreferenceStore | None = None,
+    ruleset: Ruleset | None = None,
 ) -> Candidate:
     """Return a copy of `candidate` with its final tier, confidence, and reason set."""
+    ruleset = ruleset if ruleset is not None else DEFAULT_RULESET
     root = project.root if project is not None else None
 
     # 0. User preference: an explicit "never touch this path" rule wins over everything —
@@ -52,7 +54,7 @@ def classify(
 
     # 1. Protect lattice top: a protected path is irreplaceable regardless of anything else.
     #    (Known reclaimable units won't match, but this keeps the lattice invariant honest.)
-    pr = protect_reason(candidate.path.name, is_dir=True)
+    pr = ruleset.protect_reason(candidate.path.name, is_dir=True)
     if pr is not None:
         return replace(candidate, tier=Tier.IRREPLACEABLE, confidence=1.0,
                        reason=pr, project_root=root)
@@ -92,13 +94,17 @@ def classify_scan(
     result: ScanResult,
     analyzer: ProjectAnalyzer | None = None,
     preferences: PreferenceStore | None = None,
+    ruleset: Ruleset | None = None,
 ) -> ScanResult:
     """Enrich a raw scan: attach project facts and final tiers to every candidate.
 
     This is the join point of the §5 pipeline — FsNode/Candidate meets ProjectFacts. Runs
     after the fast walk so the hot path stays free of git/classification work. Saved user
-    preferences (if any) hard-protect matching paths here, before any plan is built."""
-    analyzer = analyzer or ProjectAnalyzer()
+    preferences (if any) hard-protect matching paths here, before any plan is built. The
+    `ruleset` (built-ins by default) supplies the protections *and* the set of dirs whose
+    mtimes don't count as activity, so a user's custom build dir doesn't mask dormancy."""
+    ruleset = ruleset if ruleset is not None else DEFAULT_RULESET
+    analyzer = analyzer or ProjectAnalyzer(activity_skip=ruleset.activity_skip_names())
 
     classified: list[Candidate] = []
     roots: dict = {}   # root Path -> ProjectFacts, deduped across candidates
@@ -106,7 +112,7 @@ def classify_scan(
         facts = analyzer.facts_for(cand.path)
         if facts is not None:
             roots[facts.root] = facts
-        classified.append(classify(cand, facts, preferences))
+        classified.append(classify(cand, facts, preferences, ruleset))
 
     return replace(
         result,

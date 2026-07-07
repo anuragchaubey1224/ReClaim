@@ -26,10 +26,12 @@ from rich.table import Table
 from reclaim.ai.agent import Agent, Proposal
 from reclaim.ai.tools import ToolContext
 from reclaim.core.classifier import classify_scan
+from reclaim.core.config import ReclaimConfig, build_ruleset, load_config
 from reclaim.core.model import OpState, Plan, ScanResult, Tier
 from reclaim.core.planner import Planner, PlanGoal, PlanResult, parse_size
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore, UndoError
+from reclaim.core.rules import Ruleset
 from reclaim.core.scanner import Scanner
 from reclaim.humanize import human_bytes
 from reclaim.safety.gate import GateResult, SafetyGate
@@ -70,19 +72,40 @@ def _prefs() -> PreferenceStore:
     return PreferenceStore(_reclaim_home() / "preferences.json")
 
 
+def _config_path() -> Path:
+    return _reclaim_home() / "config.toml"
+
+
+def _config() -> ReclaimConfig:
+    """Parse the optional `config.toml` (custom units + protections). Never raises."""
+    return load_config(_config_path())
+
+
+def _load_ruleset() -> Ruleset:
+    """The active ruleset = built-ins extended by user config, warnings surfaced once.
+
+    Called at the start of every scanning command so a config typo is visible (on stderr)
+    rather than silently ignored, and the *same* ruleset flows into scan, classify, and gate."""
+    cfg = _config()
+    for w in cfg.warnings:
+        err.print(f"[yellow]config:[/] {w}")
+    return build_ruleset(cfg)
+
+
 def _recover(store: QuarantineStore) -> None:
     """Repair any transaction interrupted by a prior crash, announcing what it did."""
     for action in store.recover():
         err.print(f"[yellow]recovered[/] {action}")
 
 
-def _scan_and_classify(path: Path, workers: Optional[int],
-                       context_sensitive: bool) -> tuple[ScanResult, Scanner]:
-    scanner = Scanner(workers=workers, include_context_sensitive=context_sensitive)
+def _scan_and_classify(path: Path, workers: Optional[int], context_sensitive: bool,
+                       ruleset: Ruleset) -> tuple[ScanResult, Scanner]:
+    scanner = Scanner(workers=workers, include_context_sensitive=context_sensitive,
+                      ruleset=ruleset)
     with console.status(f"scanning [bold]{path}[/] …", spinner="dots"):
         raw = scanner.scan(path)
     with console.status("classifying projects (git state, activity) …", spinner="dots"):
-        res = classify_scan(raw, preferences=_prefs())
+        res = classify_scan(raw, preferences=_prefs(), ruleset=ruleset)
     return res, scanner
 
 
@@ -234,7 +257,8 @@ def _render_plan(pr: PlanResult, gate: GateResult) -> None:
 def scan(path: Optional[Path] = _PATH_ARG, workers: Optional[int] = _WORKERS_OPT,
          context_sensitive: bool = _CS_OPT) -> None:
     """Scan a directory and report reclaimable space, grouped by tier."""
-    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive)
+    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive,
+                                      _load_ruleset())
     _print_scan_line(res, scanner)
     _print_tier_summary(res)
 
@@ -243,7 +267,8 @@ def scan(path: Optional[Path] = _PATH_ARG, workers: Optional[int] = _WORKERS_OPT
 def status(path: Optional[Path] = _PATH_ARG, workers: Optional[int] = _WORKERS_OPT,
            context_sensitive: bool = _CS_OPT) -> None:
     """Full reclaimable report: tiers + per-project fact sheets (read-only)."""
-    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive)
+    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive,
+                                      _load_ruleset())
     _print_scan_line(res, scanner)
     _print_tier_summary(res)
     _print_projects(res)
@@ -254,11 +279,11 @@ def status(path: Optional[Path] = _PATH_ARG, workers: Optional[int] = _WORKERS_O
 # --------------------------------------------------------------------------- #
 
 def _plan_flow(path: Path, workers: Optional[int], context_sensitive: bool,
-               goal: PlanGoal) -> tuple[PlanResult, GateResult, Scanner]:
-    res, scanner = _scan_and_classify(path, workers, context_sensitive)
+               goal: PlanGoal, ruleset: Ruleset) -> tuple[PlanResult, GateResult, Scanner]:
+    res, scanner = _scan_and_classify(path, workers, context_sensitive, ruleset)
     _print_scan_line(res, scanner)
     pr = Planner().plan(res, goal)
-    gate = SafetyGate(preferences=_prefs()).validate(pr.plan)
+    gate = SafetyGate(preferences=_prefs(), ruleset=ruleset).validate(pr.plan)
     _render_plan(pr, gate)
     return pr, gate, scanner
 
@@ -280,7 +305,7 @@ def plan(
 ) -> None:
     """Preview a reclaim plan for a goal. Never mutates anything."""
     g = _goal(free, include_costly, dormant_only, kind, min_size, include_low_confidence)
-    _, gate, _ = _plan_flow(_resolve_path(path), workers, context_sensitive, g)
+    _, gate, _ = _plan_flow(_resolve_path(path), workers, context_sensitive, g, _load_ruleset())
     if not gate.approved.is_empty:
         console.print("\n[dim]run [bold]reclaim apply[/] with the same options to reclaim "
                       "this space (undoable).[/]")
@@ -303,7 +328,7 @@ def apply(
     store = _store()
     _recover(store)
     g = _goal(free, include_costly, dormant_only, kind, min_size, include_low_confidence)
-    _, gate, _ = _plan_flow(_resolve_path(path), workers, context_sensitive, g)
+    _, gate, _ = _plan_flow(_resolve_path(path), workers, context_sensitive, g, _load_ruleset())
 
     if gate.approved.is_empty:
         raise typer.Exit(0)
@@ -430,12 +455,14 @@ def _make_provider(kind: str, model: Optional[str], base_url: Optional[str] = No
 
 def _apply_proposal(proposal: Proposal, *, store: QuarantineStore,
                     write: Callable[[str], None], confirm: Callable[[Plan], bool],
-                    auto_yes: bool, preferences: Optional[PreferenceStore] = None) -> None:
+                    auto_yes: bool, preferences: Optional[PreferenceStore] = None,
+                    ruleset: Optional[Ruleset] = None) -> None:
     """Route an AI proposal through the *same* Safety Gate + confirm + quarantine as `apply`.
 
-    The gate runs fresh here (not when the model proposed) so it re-checks git state and user
-    preferences at the real moment of removal (I6 TOCTOU). The model never reaches this code."""
-    gate = SafetyGate(preferences=preferences).validate(proposal.plan)
+    The gate runs fresh here (not when the model proposed) so it re-checks git state, user
+    preferences, and the config ruleset at the real moment of removal (I6 TOCTOU). The model
+    never reaches this code."""
+    gate = SafetyGate(preferences=preferences, ruleset=ruleset).validate(proposal.plan)
     pr = PlanResult(plan=proposal.plan, goal=PlanGoal(),
                     considered=len(proposal.plan.operations), excluded=())
     _render_plan(pr, gate)
@@ -454,7 +481,8 @@ def _apply_proposal(proposal: Proposal, *, store: QuarantineStore,
 def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
              write: Callable[[str], None], store: QuarantineStore,
              confirm: Callable[[Plan], bool], auto_yes: bool = False,
-             preferences: Optional[PreferenceStore] = None) -> None:
+             preferences: Optional[PreferenceStore] = None,
+             ruleset: Optional[Ruleset] = None) -> None:
     """Drive one chat session. Injectable I/O + store make this testable with a fake provider.
 
     Loop: read a line → agent answers (running read-only tools) → if it proposed a plan,
@@ -484,7 +512,8 @@ def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
             write("[yellow](stopped after several tool steps — ask again to continue)[/]")
         if reply.proposal is not None and reply.proposal.is_actionable:
             _apply_proposal(reply.proposal, store=store, write=write,
-                            confirm=confirm, auto_yes=auto_yes, preferences=preferences)
+                            confirm=confirm, auto_yes=auto_yes, preferences=preferences,
+                            ruleset=ruleset)
 
 
 @app.command()
@@ -510,7 +539,8 @@ def chat(
     Safety Gate and your confirmation. Bring your own provider — Claude, OpenRouter, OpenAI,
     any OpenAI-compatible endpoint, or a fully-local Ollama model. The engine works fully
     without this command."""
-    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive)
+    ruleset = _load_ruleset()
+    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive, ruleset)
     _print_scan_line(res, scanner)
     store = _store()
     _recover(store)
@@ -536,7 +566,7 @@ def chat(
         )
 
     run_chat(agent, read=read, write=console.print, store=store,
-             confirm=confirm, auto_yes=yes, preferences=prefs)
+             confirm=confirm, auto_yes=yes, preferences=prefs, ruleset=ruleset)
 
 
 # --------------------------------------------------------------------------- #
@@ -581,6 +611,89 @@ def prefs() -> None:
     for p in rules:
         table.add_row(p.pattern, p.note or "—")
     console.print(table)
+
+
+# --------------------------------------------------------------------------- #
+# User config file — custom reclaimable units + protections (Phase 3a)
+# --------------------------------------------------------------------------- #
+
+_STARTER_CONFIG = """\
+# Reclaim configuration — everything here is OPTIONAL.
+# Reclaim works with no config file at all; this only *extends* the built-in rules.
+# Docs: docs/config-reference.md
+
+# ── Custom reclaimable units ────────────────────────────────────────────────
+# Directory basenames Reclaim may treat as regenerable clutter. Each needs a
+# rebuild command and a tier: "green" (cheap to rebuild) or "yellow" (costly).
+# A name that is also a protected directory is ignored — protections always win.
+
+# [[units]]
+# name = "_build"          # e.g. an Elixir/Erlang build dir
+# regen = "mix compile"
+# tier = "yellow"
+
+# [[units]]
+# name = ".gradle-cache"
+# regen = "gradle build"
+# tier = "green"
+
+# ── Custom protections (always 🔴, never reclaimed) ─────────────────────────
+# These extend the built-in secret/data protections.
+
+# [protect]
+# dirs  = ["research-data", "recordings"]   # directory basenames to always protect
+# files = ["*.pcap", "*.hdf5"]              # file-basename globs to always protect
+"""
+
+
+@app.command()
+def config(
+    init: bool = typer.Option(False, "--init",
+                              help="Write a commented starter config if none exists"),
+) -> None:
+    """Show (or scaffold with --init) the user config: custom units + protections.
+
+    The config file lives at `$RECLAIM_HOME/config.toml` (default `~/.reclaim/config.toml`)."""
+    path = _config_path()
+    if init:
+        if path.exists():
+            console.print(f"[dim]config already exists at[/] {path}")
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(_STARTER_CONFIG)
+            console.print(f"[green]✓ wrote starter config[/] {path}")
+            console.print("[dim]edit it, then run [bold]reclaim config[/] to check it.[/]")
+        return
+
+    cfg = _config()
+    found = "[green](found)[/]" if path.exists() else \
+            "[dim](not present — using built-in rules)[/]"
+    console.print(f"[dim]config file:[/] {path} {found}")
+    for w in cfg.warnings:
+        console.print(f"[yellow]⚠ {w}[/]")
+    if cfg.is_empty:
+        if not cfg.warnings:
+            console.print("[dim]no custom rules. scaffold one with "
+                          "[bold]reclaim config --init[/].[/]")
+        return
+
+    if cfg.units:
+        console.print("\n[bold]Custom reclaimable units[/]")
+        table = Table(show_header=True, header_style="dim", box=None, pad_edge=False)
+        table.add_column("name")
+        table.add_column("tier")
+        table.add_column("rebuild", style="dim")
+        for name, rule in cfg.units:
+            emoji = _TIER_META[rule.tier][0]
+            table.add_row(name, f"{emoji} {rule.tier.value}", rule.regen_command)
+        console.print(table)
+
+    if cfg.protect_dirs or cfg.protect_file_globs:
+        console.print("\n[bold]Custom protections[/] [dim](always 🔴)[/]")
+        if cfg.protect_dirs:
+            console.print("  dirs:  " + ", ".join(sorted(cfg.protect_dirs)))
+        if cfg.protect_file_globs:
+            console.print("  files: " + ", ".join(cfg.protect_file_globs))
 
 
 if __name__ == "__main__":
