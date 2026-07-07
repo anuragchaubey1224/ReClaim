@@ -64,4 +64,4 @@ and a product that shows genuine CS depth to a hiring manager.
 - [x] Phase 0 — scanner spike + repo scaffold ([results](./08-benchmarks-and-results.md): 5/5 tests, ~1.4× faster than `du`)
 - [x] Phase 1 — deterministic engine (MVP) — scan/classify/plan/apply/undo/purge, reversible + crash-safe
 - [x] Phase 2 — AI agent layer — grounded `reclaim chat`, preference memory, bring-your-own-provider
-- [ ] Phase 3 — ambient product: **[x] 3a config file** ([`config-reference.md`](./config-reference.md)) · trends · background daemon · TUI · packaging
+- [ ] Phase 3 — ambient product: **[x] 3a config file** ([`config-reference.md`](./config-reference.md)) · **[x] 3e packaging** (pipx, LICENSE, demo, README) · trends · background daemon · TUI

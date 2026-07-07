@@ -62,10 +62,18 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
   custom reclaimable units + protections, folded into a `Ruleset` threaded through
   scan → classify → gate. Fail-safe parsing; protections always win. `reclaim config` /
   `--init`. See [`config-reference.md`](./config-reference.md).)_
+- [x] **Packaging & polish.** _(3e — `pipx`-installable (`pipx install .` / `git+…`); MIT
+  `LICENSE`; packaging metadata (v0.1.0, urls, classifiers); a **reproducible** terminal demo
+  (`demo/reclaim.tape`, rendered by `vhs`) instead of a hand-recorded GIF; a real,
+  current-state root README; `CHANGELOG.md`.)_
 - [ ] Background daemon: watch disk growth, warn before the wall.
 - [ ] Trends ("Docker grew 12 GB this month").
 - [ ] TUI dashboard.
-- [ ] `brew install` / one-line installer, real README, demo GIF.
+
+> **3e (done):** `reclaim` installs as a single CLI (`pipx install .` verified end-to-end —
+> wheel builds, console script runs). The demo is generated from a checked-in `vhs` tape so it
+> never drifts out of date. README reflects the real surface (engine + AI + config, 171 tests,
+> 3-OS CI).
 
 > **3a (done):** a `Ruleset` bundles the built-in + user-config rules and flows through the
 > whole pipeline, so a custom unit is recognized like `node_modules` and a custom protection is

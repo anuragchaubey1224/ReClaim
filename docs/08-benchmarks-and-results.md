@@ -63,4 +63,26 @@ empirically justified, not assumed (ADR AD1).
 
 ---
 
-<!-- Phase 1+ results will be appended below as they land. -->
+## Phases 1–3 — engine, AI agent, config, packaging (test coverage)
+
+The safety story is carried by **test-encoded invariants**, not prose. Cumulative suite as of
+v0.1.0: **171 tests**, all hermetic (injected clock / id-gen / git runner / LLM client /
+transport; `$RECLAIM_HOME` isolates the quarantine store), green on a **3-OS ×
+Python 3.10/3.12** CI matrix.
+
+| Area | What the tests lock in |
+|------|------------------------|
+| Classifier (1a) | 🔴 wins over everything · unknown ⇒ 🔴 · git-WIP (dirty/unpushed/no-upstream) hard-protected · dormancy raises confidence but never lowers safety |
+| Quarantine + journal (1b) | `undo` restores **byte-identically** · apply is atomic (mid-apply failure rolls back fully) · a crash is repaired at startup · cross-FS copy-verify-delete · undo never clobbers a reoccupied path · purge frees blocks (even a read-only tree) |
+| Safety Gate (1b/3) | apply-time re-validation (TOCTOU): a repo gone dirty, a vanished source, or a config/preference protection all reject at the gate |
+| AI agent (2) | the agent can only read facts + *propose*; every proposal re-enters the gate; the engine runs fully with the agent absent (I7) |
+| Config (3a) | broken config degrades to built-ins **+ warning**, never crashes · protections always win (a name that's both a unit and a protection stays protected) · custom protection enforced at classify **and** at the gate |
+
+### Packaging (3e)
+- **Installable CLI** — `python -m build` produces `reclaim-0.1.0-py3-none-any.whl`; installing
+  it into a fresh venv puts a working `reclaim` on PATH (verified end-to-end). `pipx install .`
+  / `pipx install git+…` therefore work; the AI SDK stays an optional `[ai]` extra.
+- **Reproducible demo** — the README animation is generated from a checked-in `vhs` tape
+  (`demo/reclaim.tape`), so it can't drift out of date.
+
+<!-- Later phases (trends, daemon, TUI) will be appended below as they land. -->
