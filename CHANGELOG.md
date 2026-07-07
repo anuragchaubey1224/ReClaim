@@ -38,13 +38,16 @@ all in place; a stranger can safely reclaim disk space with it today, with one-c
   growth per root and warns *before* the wall — with the amount you'd get back and the command
   to do it. `--once` (for cron/launchd/Task Scheduler) or a foreground loop; native desktop
   notifications with a `watch.log` fallback; thresholds via flags or a `[watch]` config section.
+- **Phase 3d — live dashboard.** `reclaim dashboard` — a one-screen view composing reclaimable
+  space by tier, a disk bar, top units, projects (git/dormancy), and the trend. One-shot, or
+  `--refresh 5s` for a full-screen live loop. Built on `rich` alone (no heavyweight TUI dep).
 - **Phase 3e — packaging.** `pipx`-installable, MIT `LICENSE`, packaging metadata, a
   reproducible terminal demo, and a real README.
 
 ### Safety invariants (test-encoded)
 
 Never reclaims 🔴 / uncommitted / unpushed work · `undo` restores byte-identically · atomic
-all-or-nothing apply with crash rollback · apply-time re-validation · 219 hermetic tests on a
+all-or-nothing apply with crash rollback · apply-time re-validation · 229 hermetic tests on a
 3-OS × Python 3.10/3.12 CI matrix.
 
 [0.1.0]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.0

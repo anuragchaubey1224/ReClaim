@@ -57,7 +57,7 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
   endpoint, or a fully-local Ollama; the engine works fully with the agent absent (I7).
 - **Exit criteria:** ✅ the demo paragraph in [`01-vision.md`](./01-vision.md) works.
 
-## Phase 3 — The ambient product _(polish & wow)_
+## Phase 3 — The ambient product _(polish & wow)_ ✅ **COMPLETE**
 - [x] **User config file for custom rules/protections.** _(3a — `~/.reclaim/config.toml`:
   custom reclaimable units + protections, folded into a `Ruleset` threaded through
   scan → classify → gate. Fail-safe parsing; protections always win. `reclaim config` /
@@ -74,7 +74,9 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
   the "here's how much you'd get back" fix. `--once` for cron/launchd/Task Scheduler or a
   foreground loop; native desktop notifications + `watch.log`; thresholds via flags or a
   `[watch]` config section.)_
-- [ ] TUI dashboard.
+- [x] **Dashboard.** _(3d — `reclaim dashboard`: a one-screen live view composing summary-by-tier,
+  a disk bar, top units, projects (git/dormancy), and the trend. One-shot or `--refresh 5s` in a
+  full-screen `rich.Live` loop. Built on `rich` alone — no heavyweight TUI dependency.)_
 
 > **3e (done):** `reclaim` installs as a single CLI (`pipx install .` verified end-to-end —
 > wheel builds, console script runs). The demo is generated from a checked-in `vhs` tape so it
@@ -92,6 +94,11 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
 > Each check also records a history snapshot, so watch feeds trends. Notifications degrade
 > gracefully (native → console → `watch.log`); nothing here ever deletes. +24 tests →
 > **219 total.**
+>
+> **3d (done):** `build_dashboard()` is a pure composition function (scan result + disk + trend
+> → rich renderables) rendered either one-shot or in a `rich.Live` refresh loop — a real
+> dashboard on `rich` alone, keeping the minimal-deps, everything-tested discipline. **Phase 3
+> complete.** +10 tests → **229 total.**
 
 > **3a (done):** a `Ruleset` bundles the built-in + user-config rules and flows through the
 > whole pipeline, so a custom unit is recognized like `node_modules` and a custom protection is

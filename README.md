@@ -6,7 +6,7 @@
 [![CI](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml/badge.svg)](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey)
-![Tests](https://img.shields.io/badge/tests-219%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-229%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 Reclaim safely finds and removes *regenerable* developer clutter — `node_modules`, `.venv`,
@@ -79,7 +79,7 @@ pipx install "reclaim[ai] @ git+https://github.com/anuragchaubey1224/ReClaim"
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # 219 tests
+pytest                       # 229 tests
 ```
 </details>
 
@@ -117,6 +117,7 @@ Useful flags: `--include-costly` (also take 🟡), `--dormant-only`, `--kind nod
 | `reclaim chat` | Grounded AI agent — plan & explain cleanups in natural language (BYOK). |
 | `reclaim trends` / `history` | How reclaimable clutter changed over time, per kind (from your scans). |
 | `reclaim watch` | Background monitor — warn before you run out of disk; `--once` for cron/launchd. |
+| `reclaim dashboard` | Live one-screen view: reclaimable space, top units, projects, disk, and trend. |
 | `reclaim protect` / `unprotect` / `prefs` | Never-touch path rules, enforced by the engine. |
 | `reclaim config` / `config --init` | Custom reclaimable units + protections ([config ref](./docs/config-reference.md)). |
 
@@ -159,7 +160,7 @@ The load-bearing safety invariants are **test-encoded**:
 - unknown ⇒ protected;
 - user protections win over everything and are re-checked at apply time.
 
-**219 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
+**229 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
 **3-OS × Python 3.10/3.12** CI matrix.
 
 ## Documentation
@@ -176,9 +177,9 @@ The load-bearing safety invariants are **test-encoded**:
 
 ## Status
 
-The deterministic engine (Phases 0–1), the grounded AI agent (Phase 2), and most of the ambient
-layer — **config file, trends/history, and the disk watcher** (Phases 3a/3b/3c) — all ship
-today. Last on the roadmap: a TUI dashboard. See the [roadmap](./docs/06-roadmap.md).
+**Phases 0–3 are complete.** The deterministic engine (0–1), the grounded AI agent (2), and the
+full ambient layer — **config file, trends/history, disk watcher, live dashboard, and packaging**
+(3a–3e) — all ship today. See the [roadmap](./docs/06-roadmap.md).
 
 ## License
 

@@ -35,7 +35,8 @@ from reclaim.core.config import ReclaimConfig, build_ruleset, load_config
 from reclaim.core.history import HistoryStore, Trend, parse_since
 from reclaim.core.model import OpState, Plan, ScanResult, Tier
 from reclaim.core.monitor import (Alert, CheckResult, Monitor, Thresholds,
-                                  parse_interval, resolve_min_free)
+                                  parse_interval, probe_disk, resolve_min_free)
+from reclaim.cli.dashboard import build_dashboard
 from reclaim.core.planner import Planner, PlanGoal, PlanResult, parse_size
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore, UndoError
@@ -983,6 +984,69 @@ def watch(
             time.sleep(interval_seconds)
     except KeyboardInterrupt:
         console.print("\n[dim]stopped.[/]")
+
+
+# --------------------------------------------------------------------------- #
+# Dashboard — the whole picture at a glance (Phase 3d)
+# --------------------------------------------------------------------------- #
+
+@app.command()
+def dashboard(
+    path: Optional[Path] = _PATH_ARG,
+    refresh: Optional[str] = typer.Option(
+        None, "--refresh",
+        help="Auto-refresh live every e.g. 5s, 30s. Omit for a one-shot snapshot."),
+    min_free: Optional[str] = typer.Option(
+        None, "--min-free", help="Free-space threshold for the disk bar (e.g. 10G or 10%)"),
+    workers: Optional[int] = _WORKERS_OPT,
+    context_sensitive: bool = _CS_OPT,
+) -> None:
+    """A live dashboard — reclaimable space, top units, projects, disk, and trend, one screen.
+
+    One-shot by default; `--refresh 5s` re-scans and redraws in a full-screen live view until
+    Ctrl-C. The trend comes from your recorded scan history; the dashboard itself is a viewer
+    and records nothing."""
+    root = _resolve_path(path)
+    cfg = _config()
+    for w in cfg.warnings:
+        err.print(f"[yellow]config:[/] {w}")
+    ruleset = build_ruleset(cfg)
+    min_free_eff = min_free or cfg.watch.min_free or "10%"
+
+    try:
+        resolve_min_free(min_free_eff, 100)                 # validate format early
+        refresh_seconds = parse_interval(refresh) if refresh else None
+    except ValueError as e:
+        err.print(f"[red]error:[/] {e}")
+        raise typer.Exit(2) from e
+
+    history = None if os.environ.get("RECLAIM_NO_HISTORY") else _history()
+
+    def snapshot():
+        raw = Scanner(workers=workers, include_context_sensitive=context_sensitive,
+                      ruleset=ruleset).scan(root)
+        res = classify_scan(raw, preferences=_prefs(), ruleset=ruleset)
+        disk = probe_disk(root)
+        trend = history.trend(root, 30) if history is not None else None
+        return build_dashboard(root, res, disk, trend, min_free=min_free_eff)
+
+    if refresh_seconds is None:
+        with console.status(f"scanning [bold]{root}[/] …", spinner="dots"):
+            view = snapshot()
+        console.print(view)
+        return
+
+    from rich.live import Live
+
+    with console.status(f"scanning [bold]{root}[/] …", spinner="dots"):
+        first = snapshot()
+    try:
+        with Live(first, console=console, screen=True, refresh_per_second=4) as live:
+            while True:
+                time.sleep(refresh_seconds)
+                live.update(snapshot())
+    except KeyboardInterrupt:
+        pass
 
 
 if __name__ == "__main__":
