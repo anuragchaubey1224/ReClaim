@@ -30,13 +30,17 @@ all in place; a stranger can safely reclaim disk space with it today, with one-c
   and custom protections, folded into a `Ruleset` threaded through scan → classify → gate.
   Protections always win; broken config degrades to the built-ins with a warning. New
   `reclaim config` / `reclaim config --init`.
+- **Phase 3b — trends & history.** Every read-only scan appends a compact snapshot to
+  `~/.reclaim/history.jsonl` (append-only, keyed by scanned root, fail-safe). `reclaim trends
+  [--since 7d|2w|3m]` reports the per-kind change in reclaimable clutter since a baseline;
+  `reclaim history` lists the raw snapshots. Opt out with `RECLAIM_NO_HISTORY`.
 - **Phase 3e — packaging.** `pipx`-installable, MIT `LICENSE`, packaging metadata, a
   reproducible terminal demo, and a real README.
 
 ### Safety invariants (test-encoded)
 
 Never reclaims 🔴 / uncommitted / unpushed work · `undo` restores byte-identically · atomic
-all-or-nothing apply with crash rollback · apply-time re-validation · 171 hermetic tests on a
+all-or-nothing apply with crash rollback · apply-time re-validation · 195 hermetic tests on a
 3-OS × Python 3.10/3.12 CI matrix.
 
 [0.1.0]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.0

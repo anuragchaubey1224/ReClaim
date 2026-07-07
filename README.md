@@ -6,7 +6,7 @@
 [![CI](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml/badge.svg)](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey)
-![Tests](https://img.shields.io/badge/tests-171%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-195%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 Reclaim safely finds and removes *regenerable* developer clutter — `node_modules`, `.venv`,
@@ -79,7 +79,7 @@ pipx install "reclaim[ai] @ git+https://github.com/anuragchaubey1224/ReClaim"
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # 171 tests
+pytest                       # 195 tests
 ```
 </details>
 
@@ -115,6 +115,7 @@ Useful flags: `--include-costly` (also take 🟡), `--dormant-only`, `--kind nod
 | `reclaim undo [op]` | Restore a quarantined operation (latest by default), byte-identically. |
 | `reclaim ls` / `purge` | Inspect the quarantine store / permanently free items past a TTL. |
 | `reclaim chat` | Grounded AI agent — plan & explain cleanups in natural language (BYOK). |
+| `reclaim trends` / `history` | How reclaimable clutter changed over time, per kind (from your scans). |
 | `reclaim protect` / `unprotect` / `prefs` | Never-touch path rules, enforced by the engine. |
 | `reclaim config` / `config --init` | Custom reclaimable units + protections ([config ref](./docs/config-reference.md)). |
 
@@ -157,7 +158,7 @@ The load-bearing safety invariants are **test-encoded**:
 - unknown ⇒ protected;
 - user protections win over everything and are re-checked at apply time.
 
-**171 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
+**195 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
 **3-OS × Python 3.10/3.12** CI matrix.
 
 ## Documentation

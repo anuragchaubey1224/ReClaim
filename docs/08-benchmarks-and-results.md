@@ -66,7 +66,7 @@ empirically justified, not assumed (ADR AD1).
 ## Phases 1–3 — engine, AI agent, config, packaging (test coverage)
 
 The safety story is carried by **test-encoded invariants**, not prose. Cumulative suite as of
-v0.1.0: **171 tests**, all hermetic (injected clock / id-gen / git runner / LLM client /
+v0.1.0: **195 tests**, all hermetic (injected clock / id-gen / git runner / LLM client /
 transport; `$RECLAIM_HOME` isolates the quarantine store), green on a **3-OS ×
 Python 3.10/3.12** CI matrix.
 
@@ -77,6 +77,7 @@ Python 3.10/3.12** CI matrix.
 | Safety Gate (1b/3) | apply-time re-validation (TOCTOU): a repo gone dirty, a vanished source, or a config/preference protection all reject at the gate |
 | AI agent (2) | the agent can only read facts + *propose*; every proposal re-enters the gate; the engine runs fully with the agent absent (I7) |
 | Config (3a) | broken config degrades to built-ins **+ warning**, never crashes · protections always win (a name that's both a unit and a protection stays protected) · custom protection enforced at classify **and** at the gate |
+| Trends (3b) | history is append-only, keyed by root, fail-safe (corrupt line / missing file / write error never breaks a scan) · trend picks the right baseline for the look-back window · correct signed per-kind deltas · `RECLAIM_NO_HISTORY` opts out |
 
 ### Packaging (3e)
 - **Installable CLI** — `python -m build` produces `reclaim-0.1.0-py3-none-any.whl`; installing
@@ -85,4 +86,4 @@ Python 3.10/3.12** CI matrix.
 - **Reproducible demo** — the README animation is generated from a checked-in `vhs` tape
   (`demo/reclaim.tape`), so it can't drift out of date.
 
-<!-- Later phases (trends, daemon, TUI) will be appended below as they land. -->
+<!-- Later phases (daemon, TUI) will be appended below as they land. -->

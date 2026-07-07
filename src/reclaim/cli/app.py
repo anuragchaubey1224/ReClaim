@@ -16,6 +16,7 @@ file only parses args, renders, and confirms.
 from __future__ import annotations
 
 import os
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, List, Optional
 
@@ -27,13 +28,14 @@ from reclaim.ai.agent import Agent, Proposal
 from reclaim.ai.tools import ToolContext
 from reclaim.core.classifier import classify_scan
 from reclaim.core.config import ReclaimConfig, build_ruleset, load_config
+from reclaim.core.history import HistoryStore, Trend, parse_since
 from reclaim.core.model import OpState, Plan, ScanResult, Tier
 from reclaim.core.planner import Planner, PlanGoal, PlanResult, parse_size
 from reclaim.core.preferences import PreferenceStore
 from reclaim.core.quarantine import QuarantineStore, UndoError
 from reclaim.core.rules import Ruleset
 from reclaim.core.scanner import Scanner
-from reclaim.humanize import human_bytes
+from reclaim.humanize import human_bytes, human_delta
 from reclaim.safety.gate import GateResult, SafetyGate
 
 app = typer.Typer(add_completion=False, help="Reclaim — disk-reclamation engine")
@@ -90,6 +92,21 @@ def _load_ruleset() -> Ruleset:
     for w in cfg.warnings:
         err.print(f"[yellow]config:[/] {w}")
     return build_ruleset(cfg)
+
+
+def _history() -> HistoryStore:
+    """The scan-history log, stored alongside the quarantine at `$RECLAIM_HOME`."""
+    return HistoryStore(_reclaim_home() / "history.jsonl")
+
+
+def _record(res: ScanResult, root: Path) -> None:
+    """Append a snapshot of this scan for trends. Silent + best-effort — never breaks a scan.
+
+    Opt out by setting `RECLAIM_NO_HISTORY`. Only the read-only inventory commands
+    (scan/status) record, so `reclaim trends` reflects the times you actually measured."""
+    if os.environ.get("RECLAIM_NO_HISTORY"):
+        return
+    _history().record_scan(res, root)
 
 
 def _recover(store: QuarantineStore) -> None:
@@ -257,21 +274,23 @@ def _render_plan(pr: PlanResult, gate: GateResult) -> None:
 def scan(path: Optional[Path] = _PATH_ARG, workers: Optional[int] = _WORKERS_OPT,
          context_sensitive: bool = _CS_OPT) -> None:
     """Scan a directory and report reclaimable space, grouped by tier."""
-    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive,
-                                      _load_ruleset())
+    root = _resolve_path(path)
+    res, scanner = _scan_and_classify(root, workers, context_sensitive, _load_ruleset())
     _print_scan_line(res, scanner)
     _print_tier_summary(res)
+    _record(res, root)
 
 
 @app.command()
 def status(path: Optional[Path] = _PATH_ARG, workers: Optional[int] = _WORKERS_OPT,
            context_sensitive: bool = _CS_OPT) -> None:
     """Full reclaimable report: tiers + per-project fact sheets (read-only)."""
-    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive,
-                                      _load_ruleset())
+    root = _resolve_path(path)
+    res, scanner = _scan_and_classify(root, workers, context_sensitive, _load_ruleset())
     _print_scan_line(res, scanner)
     _print_tier_summary(res)
     _print_projects(res)
+    _record(res, root)
 
 
 # --------------------------------------------------------------------------- #
@@ -694,6 +713,112 @@ def config(
             console.print("  dirs:  " + ", ".join(sorted(cfg.protect_dirs)))
         if cfg.protect_file_globs:
             console.print("  files: " + ", ".join(cfg.protect_file_globs))
+
+
+# --------------------------------------------------------------------------- #
+# Trends & history — how reclaimable clutter changes over time (Phase 3b)
+# --------------------------------------------------------------------------- #
+
+def _human_span(seconds: float) -> str:
+    """A coarse human span for a trend window: hours / days / weeks / months / years."""
+    days = seconds / 86_400
+    if days < 1:
+        return f"{max(1, int(seconds // 3600))} hour(s)"
+    if days < 14:
+        return f"{round(days)} day(s)"
+    if days < 60:
+        return f"{round(days / 7)} week(s)"
+    if days < 365:
+        return f"{round(days / 30)} month(s)"
+    return f"{days / 365:.1f} year(s)"
+
+
+def _render_trend(t: Trend) -> None:
+    delta = t.reclaimable_delta
+    verb, style = (("grew", "yellow") if delta > 0 else
+                   ("shrank", "green") if delta < 0 else ("was unchanged", "dim"))
+    since = datetime.fromtimestamp(t.baseline.ts).strftime("%b %d")
+    console.print(
+        f"\n[bold]Reclaimable clutter[/] under {_short_path(Path(t.root))} "
+        f"[{style}]{verb} {human_delta(delta)}[/] over the last {_human_span(t.span_seconds)} "
+        f"[dim](since {since})[/]"
+    )
+    console.print(
+        f"[dim]now {human_bytes(t.latest.reclaimable_allocated)} reclaimable · "
+        f"was {human_bytes(t.baseline.reclaimable_allocated)}[/]"
+    )
+    if not t.kinds:
+        console.print("\n[dim]no per-kind changes.[/]")
+        return
+    table = Table(show_header=True, header_style="dim", box=None, pad_edge=False)
+    table.add_column("kind")
+    table.add_column("was", justify="right", style="dim")
+    table.add_column("now", justify="right")
+    table.add_column("change", justify="right")
+    for d in t.kinds[:15]:
+        d_style = "yellow" if d.delta > 0 else "green"
+        table.add_row(d.kind, human_bytes(d.before), human_bytes(d.after),
+                      f"[{d_style}]{human_delta(d.delta)}[/]")
+    console.print()
+    console.print(table)
+
+
+@app.command()
+def trends(
+    path: Optional[Path] = _PATH_ARG,
+    since: str = typer.Option("30d", "--since",
+                              help="Look-back window, e.g. 7d, 2w, 3m, 1y"),
+) -> None:
+    """Show how reclaimable clutter changed over time, from your past scans of this path.
+
+    History is recorded by `reclaim scan` / `status`. Run one now and again later (or on a
+    schedule) to build a trend — nothing here scans; it reads the recorded snapshots."""
+    root = _resolve_path(path)
+    try:
+        since_days = parse_since(since)
+    except ValueError as e:
+        err.print(f"[red]error:[/] {e}")
+        raise typer.Exit(2) from e
+    trend = _history().trend(root, since_days)
+    if trend is None:
+        console.print(
+            f"[dim]not enough history for[/] {_short_path(root)} [dim]yet. "
+            f"run [bold]reclaim scan {root}[/] now and again later to build a trend.[/]"
+        )
+        return
+    _render_trend(trend)
+
+
+@app.command("history")
+def history_cmd(
+    path: Optional[Path] = _PATH_ARG,
+    limit: int = typer.Option(20, "--limit", "-n", help="Show the most recent N snapshots"),
+    all_roots: bool = typer.Option(False, "--all",
+                                   help="All scanned paths, not just this one"),
+) -> None:
+    """List recorded scan snapshots — the raw history behind `reclaim trends`."""
+    root = None if all_roots else _resolve_path(path)
+    snaps = _history().load(root)
+    if not snaps:
+        console.print("[dim]no scan history yet. run [bold]reclaim scan[/] to start "
+                      "recording.[/]")
+        return
+    table = Table(show_header=True, header_style="dim", box=None, pad_edge=False)
+    table.add_column("when")
+    if all_roots:
+        table.add_column("path")
+    table.add_column("reclaimable", justify="right")
+    table.add_column("on disk", justify="right", style="dim")
+    table.add_column("files", justify="right", style="dim")
+    for s in reversed(snaps[-limit:]):          # most recent first
+        when = datetime.fromtimestamp(s.ts).strftime("%Y-%m-%d %H:%M")
+        row = [when]
+        if all_roots:
+            row.append(_short_path(Path(s.root)))
+        row += [human_bytes(s.reclaimable_allocated), human_bytes(s.total_allocated),
+                f"{s.file_count:,}"]
+        table.add_row(*row)
+    console.print(table)
 
 
 if __name__ == "__main__":

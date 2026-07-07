@@ -13,3 +13,10 @@ def human_bytes(n: float) -> str:
             return f"{n:.1f} {unit}"
         n /= 1024
     return f"{n:.1f} PB"
+
+
+def human_delta(n: int) -> str:
+    """Render a signed byte change, e.g. +1.5 GB · -800.0 MB · ±0 B (for trends)."""
+    if n == 0:
+        return "±0 B"
+    return f"{'+' if n > 0 else '-'}{human_bytes(abs(n))}"
