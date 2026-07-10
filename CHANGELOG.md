@@ -3,9 +3,25 @@
 All notable changes to Reclaim are recorded here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions follow [SemVer](https://semver.org).
 
+## [0.1.2] — 2026-07-10
+
+The first release actually published to PyPI. `0.1.1` was tagged, but its release build failed
+on the Windows CI leg, so nothing was uploaded — this release fixes that by scoping the
+platform claims to what is genuinely verified.
+
+### Changed
+
+- **Windows is now best-effort, not a supported/CI-gated platform.** The Windows CI leg had
+  been failing (the `platform/` layer runs there, but its byte-accounting is approximate and
+  untested), while the "3-OS CI" and Windows-parity language implied verification that never
+  existed. CI now gates on **macOS + Linux** only; the platform badge, the PyPI OS classifier,
+  and the docs are corrected to match. Windows still runs and `docs/windows-testing-guide.md`
+  remains, framed as best-effort. Promoting Windows back to a gate is future work, once a
+  Windows leg is genuinely green.
+
 ## [0.1.1] — 2026-07-10
 
-The first release published to PyPI. `0.1.0` was tagged but never uploaded.
+Tagged but never published: its release build failed on Windows CI (superseded by `0.1.2`).
 
 ### Changed
 
@@ -21,7 +37,7 @@ The first release published to PyPI. `0.1.0` was tagged but never uploaded.
 ### Added
 
 - **Release automation** (`.github/workflows/publish.yml`): publishing a GitHub Release runs
-  the 3-OS test matrix, builds, `twine check --strict`s, and uploads to PyPI via **Trusted
+  the macOS + Linux test matrix, builds, `twine check --strict`s, and uploads to PyPI via **Trusted
   Publishing** (OIDC) — no API token is stored in the repository.
 
 ## [0.1.0] — 2026-07-07
@@ -85,7 +101,8 @@ can safely reclaim disk space with it today, with one-command undo.
 
 Never reclaims 🔴 / uncommitted / unpushed work · `undo` restores byte-identically · atomic
 all-or-nothing apply with crash rollback · apply-time re-validation · 243 hermetic tests on a
-3-OS × Python 3.10/3.12 CI matrix.
+macOS + Linux × Python 3.10/3.12 CI matrix.
 
+[0.1.2]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.2
 [0.1.1]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.1
 [0.1.0]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.0

@@ -81,7 +81,7 @@ agent loop, **2c** preference memory + explanations — plus bring-your-own-prov
 > **3e (done):** `reclaim` installs as a single CLI (`pipx install .` verified end-to-end —
 > wheel builds, console script runs). The demo is generated from a checked-in `vhs` tape so it
 > never drifts out of date. README reflects the real surface (engine + AI + config, 171 tests,
-> 3-OS CI).
+> macOS + Linux CI).
 >
 > **3b (done):** history is an append-only JSONL log keyed by scanned root, with an injectable
 > clock and fail-safe load (a corrupt line or write error never breaks a scan). `reclaim trends`

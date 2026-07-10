@@ -10,7 +10,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # Windows is best-effort (the platform/ layer runs there, but byte-accounting is
+        # approximate and unverified) so it's not a CI gate — see docs/windows-testing-guide.md.
+        os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:

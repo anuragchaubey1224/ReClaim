@@ -7,7 +7,7 @@ build-backend = "hatchling.build"
 # installs as `reclaim-disk` while the import package (`import reclaim`) and the console
 # script (`reclaim …`) keep their names — see [project.scripts] below.
 name = "reclaim-disk"
-version = "0.1.1"
+version = "0.1.2"
 description = "AI-guided disk-reclamation engine for developers"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -19,8 +19,9 @@ classifiers = [
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    # macOS + Linux are CI-verified. Windows runs (the platform/ layer supports it) but is
+    # best-effort and untested, so it is intentionally not advertised as a supported OS.
     "Operating System :: MacOS",
-    "Operating System :: Microsoft :: Windows",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.10",

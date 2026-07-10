@@ -58,20 +58,21 @@ single **`platform/` abstraction module**, so the rest of the engine never branc
 Architecture supporting three platforms is cheap; *verifying* them is the real cost.
 Rule: **mark a platform "supported" only after it's actually tested there.**
 
-**This is solved for free with GitHub Actions CI.** Public repos get macOS, Windows, and
-Linux runners at no cost — run the test suite on a **3-OS matrix** on every push. This
-lets you genuinely support Windows without owning a Windows machine, and a green
-cross-platform CI badge is itself a strong portfolio signal.
+**GitHub Actions CI carries this.** Public repos get macOS, Windows, and Linux runners at no
+cost. Per the rule above, the CI **gate** is the matrix we've actually made green — **macOS +
+Linux** × Python 3.10/3.12. Windows runs (the `platform/` layer supports it) but its
+byte-accounting is approximate and unverified, so it's **best-effort, not a gate**; promoting
+it to a supported OS is future work once a Windows leg is genuinely green.
 
 ```yaml
 # .github/workflows/ci.yml (sketch)
 strategy:
   matrix:
-    os: [ubuntu-latest, macos-latest, windows-latest]
+    os: [ubuntu-latest, macos-latest]   # Windows is best-effort, not a gate
 ```
 
 **Development order:** build and test on macOS first (the author's machine), keep the
-`platform/` seam clean, and let CI catch Windows/Linux regressions from day 1.
+`platform/` seam clean, and let CI catch Linux regressions from day 1.
 
 ---
 
@@ -112,5 +113,5 @@ Because everything runs locally:
 
 ## Locked decisions summary
 - **Form:** installable **CLI** over a reusable **library engine**; optional TUI later. Not a desktop app.
-- **Platforms:** **macOS + Linux + Windows** from day 1, one codebase, differences isolated in `platform/`, verified via a 3-OS GitHub Actions matrix; develop macOS-first.
+- **Platforms:** **macOS + Linux** CI-verified (one codebase, differences isolated in `platform/`); develop macOS-first. Windows is best-effort/experimental — it runs but is not a CI gate.
 - **Cost:** **₹0** hosting/deploy; AI via **BYOK (default) + Ollama (local fallback)**; no backend, local-first, privacy-preserving.

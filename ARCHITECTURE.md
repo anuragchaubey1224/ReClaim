@@ -176,7 +176,8 @@ Deep flows are in [§7](#7-workflow-diagrams).
 **Platform Abstraction (L1)** — *hide every OS difference behind one interface.*
 - Isolates: allocated-size calc, hardlink dedup key, cache-dir locations, long-path &
   case rules, file-watchers. Nothing else in the codebase branches on OS.
-- Makes macOS + Linux + Windows a **single codebase**, verified by a 3-OS CI matrix.
+- Makes macOS + Linux a **single codebase**, verified by a macOS + Linux CI matrix. The same
+  layer runs on Windows (best-effort, byte-accounting approximate and not yet CI-gated).
 
 **Scanner (L2)** — *walk roots fast, with correct byte accounting.*
 - Threaded parallel walk (I/O-bound → GIL released on syscalls).
@@ -425,7 +426,7 @@ Each with the rejected alternative and the reason.
 | **AD5** | AI capability | Propose-only, no shell/delete tool | agent runs commands | A hallucination must be *incapable* of data loss (I5). |
 | **AD6** | Safety re-check | At apply time (TOCTOU) | check only at plan time | State drifts between planning and applying (I6). |
 | **AD7** | Unknown files | Default irreplaceable | default deletable | False-keep is cheap; false-delete is catastrophic (I2). |
-| **AD8** | Cross-platform | One codebase + `platform/` layer | per-OS builds | Differences are small and isolatable; 3-OS CI verifies. |
+| **AD8** | Cross-platform | One codebase + `platform/` layer | per-OS builds | Differences are small and isolatable; macOS + Linux CI verifies (Windows best-effort). |
 | **AD9** | Storage | SQLite + append-only journals | a service / flat files only | ACID, local, zero-setup; journals survive DB loss. |
 | **AD10** | Plan selection | Greedy (safety, then size) | optimal knapsack | Explainable, O(n log n), matches user intuition. |
 | **AD11** | Scan speed edge | Opaque-blob pruning | walk everything like `du` | Don't build metadata for files we treat as one blob. |
@@ -452,7 +453,7 @@ reclaim/
 │   ├── ai/                    ← L4 agent (loop · tools · providers: claude/ollama)
 │   └── cli/                   ← L5 interface (typer app · rich render)
 ├── tests/                     ← fixtures + scanner/classifier/journal/gate suites
-└── .github/workflows/ci.yml   ← 3-OS matrix (mac · linux · windows)
+└── .github/workflows/ci.yml   ← CI matrix (mac · linux)
 ```
 
 ---
@@ -470,7 +471,7 @@ Each phase ships something demoable on its own. Detail in
   parallel        scanner·classifier  grounded chat       daemon (watcher)
   scanner vs du   project·planner     BYOK + Ollama       TUI dashboard
   module seams    quarantine·journal  propose-only tools  user rules/config
-  3-OS CI         safety gate·undo    explanations        pipx release + GIF
+  mac+linux CI    safety gate·undo    explanations        pipx release + GIF
   ─────────────   ─────────────────   ─────────────────   ─────────────────
   "beats du"      "safe reversible    "free 20G but       "warns before the
                    reclaim, AI off"     skip my WIP"        disk fills"

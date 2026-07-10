@@ -1,11 +1,11 @@
 # Reclaim
 
 > **AI-guided disk-reclamation engine for developers.**
-> Local-first · cross-platform · reversible · faster than `du`.
+> Local-first · macOS + Linux · reversible · faster than `du`.
 
 [![CI](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml/badge.svg)](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
-![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux-lightgrey)
 ![Tests](https://img.shields.io/badge/tests-243%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -164,7 +164,9 @@ The load-bearing safety invariants are **test-encoded**:
 - user protections win over everything and are re-checked at apply time.
 
 **243 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
-**3-OS × Python 3.10/3.12** CI matrix.
+**macOS + Linux × Python 3.10/3.12** CI matrix. The `platform/` layer also runs on Windows,
+but its byte-accounting is approximate and unverified there, so Windows is **best-effort and
+not a CI gate** — the benchmark numbers above are measured on macOS/APFS.
 
 ## Documentation
 
@@ -175,7 +177,7 @@ The load-bearing safety invariants are **test-encoded**:
   · [AI agent design](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/05-ai-agent-design.md) · [roadmap](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/06-roadmap.md)
   · [benchmarks](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/08-benchmarks-and-results.md).
 - [`docs/config-reference.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/config-reference.md) — the optional config file.
-- [`docs/windows-testing-guide.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/windows-testing-guide.md) — step-by-step for Windows.
+- [`docs/windows-testing-guide.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/windows-testing-guide.md) — running on Windows (best-effort; not covered by CI).
 - [`CHANGELOG.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/CHANGELOG.md).
 
 ## Status

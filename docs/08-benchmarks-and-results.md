@@ -49,7 +49,8 @@ empirically justified, not assumed (ADR AD1).
 ### Correctness / safety notes
 - Scanner is **100% read-only** — no `rm`/`unlink`/`rmtree`/`shutil.move`/`subprocess`
   anywhere in `src/` (verified by grep). It only calls `os.scandir` / `os.stat`.
-- Cross-platform (macOS/Linux/Windows) via the `platform/` abstraction; CI runs a 3-OS matrix.
+- Portable via the `platform/` abstraction; CI gates on a **macOS + Linux** matrix. Windows
+  runs but its byte-accounting is approximate and unverified (best-effort, not a CI gate).
 
 ### Resume-bullet drafts (quantified — refine later)
 - *Built a multithreaded filesystem scanner in Python (`os.scandir` + thread pool) that
@@ -67,7 +68,7 @@ empirically justified, not assumed (ADR AD1).
 
 The safety story is carried by **test-encoded invariants**, not prose. Cumulative suite as of
 v0.1.0: **229 tests**, all hermetic (injected clock / id-gen / git runner / LLM client /
-transport; `$RECLAIM_HOME` isolates the quarantine store), green on a **3-OS ×
+transport; `$RECLAIM_HOME` isolates the quarantine store), green on a **macOS + Linux ×
 Python 3.10/3.12** CI matrix.
 
 | Area | What the tests lock in |

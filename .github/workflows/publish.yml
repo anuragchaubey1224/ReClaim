@@ -14,7 +14,8 @@ jobs:
     strategy:
       fail-fast: true
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macOS + Linux gate the release; Windows is best-effort and not a publish gate.
+        os: [ubuntu-latest, macos-latest]
         python: ["3.10", "3.12"]
     runs-on: ${{ matrix.os }}
     steps:
