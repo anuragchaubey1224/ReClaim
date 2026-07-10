@@ -21,7 +21,7 @@ with full explainability and **one-command undo**.
 
 ## Demo
 
-![Reclaim reclaiming 9.6 MB across three units, then restoring all of it with one undo](./demo/reclaim.gif)
+![Reclaim reclaiming 9.6 MB across three units, then restoring all of it with one undo](https://raw.githubusercontent.com/anuragchaubey1224/ReClaim/main/demo/reclaim.gif)
 
 The same loop as text (a throwaway sandbox — `status → plan → apply → undo`):
 
@@ -52,7 +52,7 @@ $ reclaim undo
 ```
 
 The GIF is generated reproducibly from a checked-in script rather than hand-recorded, so it
-cannot drift out of date — see [`demo/`](./demo/) (`vhs demo/reclaim.tape`).
+cannot drift out of date — see [`demo/`](https://github.com/anuragchaubey1224/ReClaim/tree/main/demo) (`vhs demo/reclaim.tape`).
 
 ## Install
 
@@ -60,19 +60,20 @@ Reclaim is a single CLI. The recommended install is [`pipx`](https://pipx.pypa.i
 on your PATH):
 
 ```bash
-# from the published repo
-pipx install "git+https://github.com/anuragchaubey1224/ReClaim"
-
-# or from a local clone
-pipx install .
+pipx install reclaim-disk
 ```
 
-With [`uv`](https://docs.astral.sh/uv/): `uv tool install .` · Or plain `pip install .`.
+The distribution is named `reclaim-disk` because `reclaim` was taken on PyPI. The command you
+run is still `reclaim`.
+
+With [`uv`](https://docs.astral.sh/uv/): `uv tool install reclaim-disk` · Or plain
+`pip install reclaim-disk`. To track `main` instead of a release:
+`pipx install "git+https://github.com/anuragchaubey1224/ReClaim"`.
 
 **Optional AI co-pilot** (`reclaim chat`) — the engine works fully without it:
 
 ```bash
-pipx install "reclaim[ai] @ git+https://github.com/anuragchaubey1224/ReClaim"
+pipx install "reclaim-disk[ai]"
 ```
 
 <details>
@@ -121,14 +122,14 @@ Useful flags: `--include-costly` (also take 🟡), `--dormant-only`, `--kind nod
 | `reclaim watch` | Background monitor — warn before you run out of disk; `--once` for cron/launchd. |
 | `reclaim dashboard` | Live one-screen view: reclaimable space, top units, projects, disk, and trend. |
 | `reclaim protect` / `unprotect` / `prefs` | Never-touch path rules, enforced by the engine. |
-| `reclaim config` / `config --init` | Custom reclaimable units + protections ([config ref](./docs/config-reference.md)). |
+| `reclaim config` / `config --init` | Custom reclaimable units + protections ([config ref](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/config-reference.md)). |
 
 ## What makes it different
 
 - **Fast, byte-accurate scanner.** Parallel `os.scandir` walk with opaque-blob pruning:
   **0-byte diff vs `du` on 290K files, ~1.57× faster** — with hard-link dedup and symlink
   safety. It sums a `node_modules` as one blob instead of walking its million tiny files, so
-  memory stays flat. ([benchmarks](./docs/08-benchmarks-and-results.md))
+  memory stays flat. ([benchmarks](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/08-benchmarks-and-results.md))
 - **Fail-safe classification.** A 3-tier safety lattice — 🟢 regenerable / 🟡 costly / 🔴
   protected. **Unknown ⇒ protected.** A project with **uncommitted or unpushed git work is
   never touched**; secrets, databases, and data dirs are hard-protected.
@@ -167,22 +168,22 @@ The load-bearing safety invariants are **test-encoded**:
 
 ## Documentation
 
-- [`ARCHITECTURE.md`](./ARCHITECTURE.md) — the full system architecture, workflows, and the
+- [`ARCHITECTURE.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/ARCHITECTURE.md) — the full system architecture, workflows, and the
   load-bearing design decisions.
-- [`docs/`](./docs/) — [vision](./docs/01-vision.md) · [differentiation](./docs/02-differentiation.md)
-  · [product design](./docs/03-product-design.md) · [technical depth](./docs/04-technical-depth.md)
-  · [AI agent design](./docs/05-ai-agent-design.md) · [roadmap](./docs/06-roadmap.md)
-  · [benchmarks](./docs/08-benchmarks-and-results.md).
-- [`docs/config-reference.md`](./docs/config-reference.md) — the optional config file.
-- [`docs/windows-testing-guide.md`](./docs/windows-testing-guide.md) — step-by-step for Windows.
-- [`CHANGELOG.md`](./CHANGELOG.md).
+- [`docs/`](https://github.com/anuragchaubey1224/ReClaim/tree/main/docs) — [vision](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/01-vision.md) · [differentiation](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/02-differentiation.md)
+  · [product design](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/03-product-design.md) · [technical depth](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/04-technical-depth.md)
+  · [AI agent design](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/05-ai-agent-design.md) · [roadmap](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/06-roadmap.md)
+  · [benchmarks](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/08-benchmarks-and-results.md).
+- [`docs/config-reference.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/config-reference.md) — the optional config file.
+- [`docs/windows-testing-guide.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/windows-testing-guide.md) — step-by-step for Windows.
+- [`CHANGELOG.md`](https://github.com/anuragchaubey1224/ReClaim/blob/main/CHANGELOG.md).
 
 ## Status
 
 **Phases 0–3 are complete.** The deterministic engine (0–1), the grounded AI agent (2), and the
 full ambient layer — **config file, trends/history, disk watcher, live dashboard, and packaging**
-(3a–3e) — all ship today. See the [roadmap](./docs/06-roadmap.md).
+(3a–3e) — all ship today. See the [roadmap](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/06-roadmap.md).
 
 ## License
 
-[MIT](./LICENSE) © 2026 Anurag Chaubey
+[MIT](https://github.com/anuragchaubey1224/ReClaim/blob/main/LICENSE) © 2026 Anurag Chaubey

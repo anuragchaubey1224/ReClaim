@@ -176,10 +176,11 @@ def test_history_lookups_do_not_require_the_path_to_exist(tmp_path: Path) -> Non
 
 
 def test_chat_preflight_error_keeps_the_extras_marker_intact(monkeypatch) -> None:
-    """`reclaim[ai]` must survive rendering — rich would otherwise eat `[ai]` as markup and
-    print an install command that doesn't install the AI extra."""
+    """`reclaim-disk[ai]` must survive rendering — rich would otherwise eat `[ai]` as markup
+    and print an install command that doesn't install the AI extra. The distribution name
+    matters: plain `reclaim` is a different project on PyPI."""
     import sys
     monkeypatch.setitem(sys.modules, "anthropic", None)
     result = runner.invoke(app, ["chat", "."])
     assert result.exit_code == 2
-    assert 'reclaim[ai]' in result.output
+    assert 'reclaim-disk[ai]' in result.output

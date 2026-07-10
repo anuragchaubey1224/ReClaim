@@ -594,7 +594,7 @@ def chat(
     try:
         provider.preflight()
     except ProviderUnavailable as e:
-        # escape(): the remedy text contains `reclaim[ai]`, which rich would eat as markup.
+        # escape(): the remedy text contains `reclaim-disk[ai]`, which rich would eat as markup.
         err.print(f"[red]error:[/] {escape(str(e))}")
         raise typer.Exit(2) from e
 

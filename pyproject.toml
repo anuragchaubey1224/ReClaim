@@ -3,8 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "reclaim"
-version = "0.1.0"
+# Distribution name only. `reclaim` and `reclaim-cli` are both taken on PyPI, so the package
+# installs as `reclaim-disk` while the import package (`import reclaim`) and the console
+# script (`reclaim …`) keep their names — see [project.scripts] below.
+name = "reclaim-disk"
+version = "0.1.1"
 description = "AI-guided disk-reclamation engine for developers"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -39,6 +42,7 @@ dev = ["pytest>=8.0"]
 # The AI co-pilot (Phase 2) is optional — the engine works fully with it absent (I7).
 # BYOK Claude needs the Anthropic SDK; the Ollama backend is stdlib-only.
 ai = ["anthropic>=0.69"]
+build = ["build>=1.0", "twine>=5.0"]
 
 [project.urls]
 Homepage = "https://github.com/anuragchaubey1224/ReClaim"

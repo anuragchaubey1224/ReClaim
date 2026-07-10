@@ -5,7 +5,7 @@ request per turn). BYOK: the user's own `ANTHROPIC_API_KEY` (the SDK also honour
 `ant auth login` profile). Only the small fact set the tools return ever leaves the machine —
 never file contents.
 
-The `anthropic` SDK is an **optional** dependency (`pip install "reclaim[ai]"`) imported
+The `anthropic` SDK is an **optional** dependency (`pip install "reclaim-disk[ai]"`) imported
 lazily, so the engine — and this module's pure helpers — load with the SDK absent (invariant
 I7). The schema-conversion and response-parsing helpers are module-level and SDK-free, so the
 whole provider is unit-testable by injecting a fake client.
@@ -102,7 +102,7 @@ class ClaudeProvider(Provider):
             except ImportError as e:
                 raise ProviderUnavailable(
                     "the Claude provider needs the anthropic SDK — install with "
-                    "`pip install \"reclaim[ai]\"`, or use the Ollama provider"
+                    "`pip install \"reclaim-disk[ai]\"`, or use the Ollama provider"
                 ) from e
             try:
                 self._client = anthropic.Anthropic(api_key=self._api_key)

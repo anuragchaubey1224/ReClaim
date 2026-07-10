@@ -10,7 +10,7 @@ it runs, and what it costs to operate.
 **Decision:** Reclaim ships as an **installable command-line tool**, not a desktop GUI app.
 
 ```bash
-pipx install reclaim      # one-command install
+pipx install reclaim-disk # one-command install (the name `reclaim` was taken on PyPI)
 reclaim scan              # use it
 reclaim chat              # the AI interface
 ```

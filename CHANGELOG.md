@@ -3,10 +3,32 @@
 All notable changes to Reclaim are recorded here. The format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions follow [SemVer](https://semver.org).
 
+## [0.1.1] — 2026-07-10
+
+The first release published to PyPI. `0.1.0` was tagged but never uploaded.
+
+### Changed
+
+- **The distribution is now named `reclaim-disk`.** `reclaim` and `reclaim-cli` are both taken
+  on PyPI by unrelated projects, so `pip install reclaim` would have installed someone else's
+  package. The **import package (`import reclaim`) and the console script (`reclaim …`) are
+  unchanged** — only the install name moves. The AI extra is `reclaim-disk[ai]`, and the
+  provider's "install the SDK" hint was corrected to match; it had been telling users to run a
+  command that installs a different project.
+- **README links are absolute.** PyPI renders the README outside the repository, so every
+  relative `./docs/…` link and the demo GIF would have 404'd on the project page.
+
+### Added
+
+- **Release automation** (`.github/workflows/publish.yml`): publishing a GitHub Release runs
+  the 3-OS test matrix, builds, `twine check --strict`s, and uploads to PyPI via **Trusted
+  Publishing** (OIDC) — no API token is stored in the repository.
+
 ## [0.1.0] — 2026-07-07
 
-First packaged release. The deterministic engine, the AI agent, and the user config file are
-all in place; a stranger can safely reclaim disk space with it today, with one-command undo.
+Tagged, never published to PyPI (superseded by `0.1.1`, which renamed the distribution).
+The deterministic engine, the AI agent, and the user config file are all in place; a stranger
+can safely reclaim disk space with it today, with one-command undo.
 
 ### Added
 
@@ -65,4 +87,5 @@ Never reclaims 🔴 / uncommitted / unpushed work · `undo` restores byte-identi
 all-or-nothing apply with crash rollback · apply-time re-validation · 243 hermetic tests on a
 3-OS × Python 3.10/3.12 CI matrix.
 
+[0.1.1]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.1
 [0.1.0]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.0

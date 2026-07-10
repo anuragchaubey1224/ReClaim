@@ -328,7 +328,7 @@ def test_claude_preflight_passes_with_injected_client() -> None:
 def test_claude_preflight_without_sdk_names_the_extra(monkeypatch) -> None:
     # A None entry in sys.modules makes `import anthropic` raise ImportError.
     monkeypatch.setitem(sys.modules, "anthropic", None)
-    with pytest.raises(ProviderUnavailable, match=r'reclaim\[ai\]'):
+    with pytest.raises(ProviderUnavailable, match=r'reclaim-disk\[ai\]'):
         ClaudeProvider().preflight()
 
 
