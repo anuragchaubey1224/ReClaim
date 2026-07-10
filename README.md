@@ -21,7 +21,9 @@ with full explainability and **one-command undo**.
 
 ## Demo
 
-A walkthrough of the core loop on a throwaway sandbox (`status → plan → apply → undo`):
+![Reclaim reclaiming 9.6 MB across three units, then restoring all of it with one undo](./demo/reclaim.gif)
+
+The same loop as text (a throwaway sandbox — `status → plan → apply → undo`):
 
 ```console
 $ reclaim status ~/dev
@@ -49,8 +51,8 @@ $ reclaim undo
 ✓ restored 3 unit(s) op 20260707-144439-443c92
 ```
 
-An animated version is generated reproducibly from a checked-in script — see
-[`demo/`](./demo/) (`vhs demo/reclaim.tape`).
+The GIF is generated reproducibly from a checked-in script rather than hand-recorded, so it
+cannot drift out of date — see [`demo/`](./demo/) (`vhs demo/reclaim.tape`).
 
 ## Install
 

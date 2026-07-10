@@ -18,9 +18,6 @@ venv/
 .coverage
 htmlcov/
 
-# Demo GIF is a build artifact — regenerate with `vhs demo/reclaim.tape`
-demo/*.gif
-
 # OS / editor
 .DS_Store
 *.swp
