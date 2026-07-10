@@ -6,7 +6,7 @@
 [![CI](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml/badge.svg)](https://github.com/anuragchaubey1224/ReClaim/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Linux%20%C2%B7%20Windows-lightgrey)
-![Tests](https://img.shields.io/badge/tests-229%20passing-brightgreen)
+![Tests](https://img.shields.io/badge/tests-243%20passing-brightgreen)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 Reclaim safely finds and removes *regenerable* developer clutter — `node_modules`, `.venv`,
@@ -79,7 +79,7 @@ pipx install "reclaim[ai] @ git+https://github.com/anuragchaubey1224/ReClaim"
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest                       # 229 tests
+pytest                       # 243 tests
 ```
 </details>
 
@@ -160,7 +160,7 @@ The load-bearing safety invariants are **test-encoded**:
 - unknown ⇒ protected;
 - user protections win over everything and are re-checked at apply time.
 
-**229 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
+**243 hermetic tests** (injected clock/id-gen/git/LLM-client; isolated store) run on a
 **3-OS × Python 3.10/3.12** CI matrix.
 
 ## Documentation

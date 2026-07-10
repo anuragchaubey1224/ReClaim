@@ -27,6 +27,14 @@ from typing import Any, Mapping, Sequence
 from reclaim.ai.tools import Tool
 
 
+class ProviderUnavailable(RuntimeError):
+    """The backend cannot be used as configured — a missing SDK, key, or endpoint.
+
+    Raised by `preflight()` (and by lazy client construction) with a message that tells the
+    user how to fix it. A `RuntimeError` subclass so the chat REPL's existing catch-all still
+    keeps the session alive if one escapes mid-loop."""
+
+
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
     """A tool as advertised to the model: name, description, JSON-Schema for its input.
@@ -94,6 +102,13 @@ class Provider(ABC):
     name: str = "provider"
     #: the model id in use (for display / grounding provenance).
     model: str = ""
+
+    def preflight(self) -> None:
+        """Fail fast with `ProviderUnavailable` if this backend can't be used as configured.
+
+        The CLI calls this *before* any expensive work (a full scan), so a missing SDK or key
+        costs the user nothing. It may only check locally-knowable prerequisites — never a
+        model request. Backends that need neither key nor SDK (Ollama) inherit this no-op."""
 
     @abstractmethod
     def start(self, system: str, tools: Sequence[ToolSpec]) -> None:

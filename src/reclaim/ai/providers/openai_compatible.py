@@ -20,16 +20,26 @@ Claude (`ClaudeProvider`) remains the default and recommended backend; this is t
 from __future__ import annotations
 
 import json
+import urllib.parse
 import urllib.request
 from typing import Any, Callable, Sequence
 
 from reclaim.ai.providers.base import (
     AssistantTurn,
     Provider,
+    ProviderUnavailable,
     ToolCall,
     ToolResult,
     ToolSpec,
 )
+
+#: Hosts that serve a local model and conventionally need no key (vLLM, LM Studio, llama.cpp).
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", "0.0.0.0"})
+
+
+def is_local_endpoint(base_url: str) -> bool:
+    """True if `base_url` points at this machine, where an API key is not expected."""
+    return (urllib.parse.urlsplit(base_url).hostname or "") in _LOCAL_HOSTS
 
 # transport(url, payload) -> decoded JSON response. Injected in tests; the default POSTs JSON
 # with the provider's auth headers.
@@ -80,12 +90,18 @@ class OpenAICompatibleProvider(Provider):
         base_url: str,
         api_key: str | None = None,
         name: str = "openai-compatible",
+        key_env: str | None = None,
         transport: Transport | None = None,
         extra_headers: dict[str, str] | None = None,
     ) -> None:
+        """`key_env` names the environment variable the key came from, so `preflight()` can
+        tell the user exactly what to set."""
         self.name = name
         self.model = model
+        self._base_url = base_url
         self._url = base_url.rstrip("/") + "/chat/completions"
+        self._has_key = bool(api_key)
+        self._key_env = key_env
         headers = {"Content-Type": "application/json", **(extra_headers or {})}
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
@@ -93,6 +109,16 @@ class OpenAICompatibleProvider(Provider):
         self._transport = transport or self._default_transport
         self._tools: list[dict[str, Any]] = []
         self._messages: list[dict[str, Any]] = []
+
+    def preflight(self) -> None:
+        """A remote endpoint without a key would 401 on the first message — say so now."""
+        if self._has_key or is_local_endpoint(self._base_url):
+            return
+        where = f"set {self._key_env}" if self._key_env else "pass an API key"
+        raise ProviderUnavailable(
+            f"the {self.name} provider needs an API key — {where}, or use "
+            "`reclaim chat --ollama` for a local model"
+        )
 
     def _default_transport(self, url: str, payload: dict[str, Any]) -> dict[str, Any]:
         data = json.dumps(payload).encode("utf-8")

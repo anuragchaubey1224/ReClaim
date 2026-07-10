@@ -7,11 +7,15 @@ start → send_user → send_tool_results loop drives both.
 
 from __future__ import annotations
 
+import sys
 from types import SimpleNamespace
+
+import pytest
 
 from reclaim.ai.providers import (
     AssistantTurn,
     Provider,
+    ProviderUnavailable,
     ToolCall,
     ToolResult,
     ToolSpec,
@@ -31,6 +35,7 @@ from reclaim.ai.providers.ollama import (
 )
 from reclaim.ai.providers.openai_compatible import (
     OpenAICompatibleProvider,
+    is_local_endpoint,
     parse_openai_message,
     results_to_openai_messages,
     specs_to_openai,
@@ -306,3 +311,58 @@ def test_openai_compatible_sets_bearer_auth() -> None:
     # No key (e.g. local server) → no auth header sent.
     assert "Authorization" not in OpenAICompatibleProvider(
         model="m", base_url="http://localhost:8000/v1")._headers
+
+
+# -- preflight: a backend must fail before the CLI does expensive work ---------
+
+def test_ollama_preflight_is_a_noop() -> None:
+    """The local backend needs neither SDK nor key, so it inherits the base no-op."""
+    OllamaProvider(transport=lambda url, payload: {}).preflight()
+
+
+def test_claude_preflight_passes_with_injected_client() -> None:
+    """An injected client means credentials were already resolved by the caller."""
+    ClaudeProvider(client=SimpleNamespace()).preflight()
+
+
+def test_claude_preflight_without_sdk_names_the_extra(monkeypatch) -> None:
+    # A None entry in sys.modules makes `import anthropic` raise ImportError.
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    with pytest.raises(ProviderUnavailable, match=r'reclaim\[ai\]'):
+        ClaudeProvider().preflight()
+
+
+def test_claude_preflight_without_credentials_names_the_env_var(monkeypatch) -> None:
+    def _no_credentials(api_key=None):
+        raise RuntimeError("The api_key client option must be set")
+
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        SimpleNamespace(Anthropic=_no_credentials))
+    with pytest.raises(ProviderUnavailable, match="ANTHROPIC_API_KEY"):
+        ClaudeProvider().preflight()
+
+
+def test_claude_preflight_succeeds_when_sdk_resolves_credentials(monkeypatch) -> None:
+    monkeypatch.setitem(sys.modules, "anthropic",
+                        SimpleNamespace(Anthropic=lambda api_key=None: SimpleNamespace()))
+    ClaudeProvider(api_key="sk-123").preflight()
+
+
+def test_is_local_endpoint() -> None:
+    assert is_local_endpoint("http://localhost:8000/v1")
+    assert is_local_endpoint("http://127.0.0.1:1234/v1")
+    assert not is_local_endpoint("https://openrouter.ai/api/v1")
+
+
+def test_openai_compatible_preflight_requires_a_key_for_remote_hosts() -> None:
+    p = OpenAICompatibleProvider(model="m", base_url="https://openrouter.ai/api/v1",
+                                 name="openrouter", key_env="OPENROUTER_API_KEY")
+    with pytest.raises(ProviderUnavailable, match="OPENROUTER_API_KEY"):
+        p.preflight()
+
+
+def test_openai_compatible_preflight_allows_key_or_local_server() -> None:
+    OpenAICompatibleProvider(model="m", base_url="https://openrouter.ai/api/v1",
+                             api_key="sk-123").preflight()
+    # A local vLLM / LM Studio server conventionally needs no key.
+    OpenAICompatibleProvider(model="m", base_url="http://localhost:8000/v1").preflight()

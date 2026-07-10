@@ -44,10 +44,25 @@ all in place; a stranger can safely reclaim disk space with it today, with one-c
 - **Phase 3e — packaging.** `pipx`-installable, MIT `LICENSE`, packaging metadata, a
   reproducible terminal demo, and a real README.
 
+### Fixed
+
+- **A mistyped scan target is an error, not an empty report.** `reclaim scan ~/dve` used to
+  walk nothing and print "0.0 B reclaimable" — indistinguishable from a clean disk. Scan
+  targets are now validated (exit 2 on a missing path or a non-directory). `trends` and
+  `history` keep accepting any path: there, it is a key into recorded snapshots, not a tree
+  to walk, so a deleted or unmounted root still has a readable trend.
+- **`reclaim chat` fails before it scans, not after.** The provider is now built and
+  `preflight()`-ed up front, so a missing `anthropic` SDK, a missing API key, or a missing
+  `--model` costs you an error in milliseconds instead of a full home-directory walk followed
+  by a raw SDK exception mid-REPL. Ollama, needing neither key nor SDK, preflights clean.
+- **The install hint no longer eats its own extra.** `pip install "reclaim[ai]"` rendered as
+  `pip install "reclaim"` because `rich` parsed `[ai]` as a markup tag — the suggested command
+  did not install the AI extra. Error text is escaped before rendering.
+
 ### Safety invariants (test-encoded)
 
 Never reclaims 🔴 / uncommitted / unpushed work · `undo` restores byte-identically · atomic
-all-or-nothing apply with crash rollback · apply-time re-validation · 229 hermetic tests on a
+all-or-nothing apply with crash rollback · apply-time re-validation · 243 hermetic tests on a
 3-OS × Python 3.10/3.12 CI matrix.
 
 [0.1.0]: https://github.com/anuragchaubey1224/ReClaim/releases/tag/v0.1.0

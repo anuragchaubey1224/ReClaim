@@ -15,6 +15,7 @@ optional `anthropic` SDK.
 from reclaim.ai.providers.base import (
     AssistantTurn,
     Provider,
+    ProviderUnavailable,
     ToolCall,
     ToolResult,
     ToolSpec,
@@ -24,6 +25,7 @@ from reclaim.ai.providers.base import (
 __all__ = [
     "AssistantTurn",
     "Provider",
+    "ProviderUnavailable",
     "ToolCall",
     "ToolResult",
     "ToolSpec",

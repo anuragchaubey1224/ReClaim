@@ -18,6 +18,7 @@ from typing import Any, Sequence
 from reclaim.ai.providers.base import (
     AssistantTurn,
     Provider,
+    ProviderUnavailable,
     ToolCall,
     ToolResult,
     ToolSpec,
@@ -98,13 +99,26 @@ class ClaudeProvider(Provider):
         if self._client is None:
             try:
                 import anthropic
-            except ImportError as e:  # pragma: no cover - exercised only without the extra
-                raise RuntimeError(
+            except ImportError as e:
+                raise ProviderUnavailable(
                     "the Claude provider needs the anthropic SDK — install with "
                     "`pip install \"reclaim[ai]\"`, or use the Ollama provider"
                 ) from e
-            self._client = anthropic.Anthropic(api_key=self._api_key)
+            try:
+                self._client = anthropic.Anthropic(api_key=self._api_key)
+            except Exception as e:      # noqa: BLE001 - the SDK's own "no credentials" error
+                # Constructing the client is offline: it only resolves credentials (explicit
+                # key → ANTHROPIC_API_KEY → an `ant auth login` profile). Failing here means
+                # there are none, whatever shape the SDK's exception takes.
+                raise ProviderUnavailable(
+                    "the Claude provider needs an API key — set ANTHROPIC_API_KEY (or run "
+                    "`ant auth login`), or use `reclaim chat --ollama` for a local model"
+                ) from e
         return self._client
+
+    def preflight(self) -> None:
+        """Resolve the SDK + credentials now, so `chat` fails before it scans."""
+        self._ensure_client()
 
     def start(self, system: str, tools: Sequence[ToolSpec]) -> None:
         self._system = system

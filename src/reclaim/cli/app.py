@@ -26,9 +26,11 @@ from typing import Callable, List, Optional
 
 import typer
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
 from reclaim.ai.agent import Agent, Proposal
+from reclaim.ai.providers.base import ProviderUnavailable
 from reclaim.ai.tools import ToolContext
 from reclaim.core.classifier import classify_scan
 from reclaim.core.config import ReclaimConfig, build_ruleset, load_config
@@ -133,8 +135,28 @@ def _scan_and_classify(path: Path, workers: Optional[int], context_sensitive: bo
     return res, scanner
 
 
-def _resolve_path(path: Optional[Path]) -> Path:
+def _resolve_lookup_path(path: Optional[Path]) -> Path:
+    """Expand a path used only as a *key* into recorded history — never walked.
+
+    Left unvalidated on purpose: a root you scanned last month still has a trend worth
+    reading after you delete or unmount it."""
     return (path or Path.home()).expanduser()
+
+
+def _resolve_path(path: Optional[Path]) -> Path:
+    """Expand a scan target and prove it is a real directory.
+
+    A typo (`~/dve`) would otherwise scan nothing and report "0.0 B reclaimable" — a success
+    that reads as "your disk is clean". The scanner counts an unreadable root as a skipped
+    entry, so it cannot tell us apart from an empty tree; the check belongs here."""
+    resolved = _resolve_lookup_path(path)
+    if not resolved.exists():
+        err.print(f"[red]error:[/] path does not exist: [bold]{resolved}[/]")
+        raise typer.Exit(2)
+    if not resolved.is_dir():
+        err.print(f"[red]error:[/] not a directory: [bold]{resolved}[/]")
+        raise typer.Exit(2)
+    return resolved
 
 
 def _short_path(p: Path, width: int = 46) -> str:
@@ -473,7 +495,7 @@ def _make_provider(kind: str, model: Optional[str], base_url: Optional[str] = No
             raise typer.BadParameter(f"--model is required for --provider {kind} "
                                      "(there is no default model)")
         return OpenAICompatibleProvider(model=model, base_url=url, name=kind,
-                                        api_key=os.environ.get(key_env))
+                                        api_key=os.environ.get(key_env), key_env=key_env)
 
     from reclaim.ai.providers.claude import ClaudeProvider
     return ClaudeProvider(model=model) if model else ClaudeProvider()
@@ -528,7 +550,7 @@ def run_chat(agent: Agent, *, read: Callable[[], Optional[str]],
         try:
             reply = agent.send(line)
         except Exception as e:                      # noqa: BLE001 - REPL must survive it
-            write(f"[red]error:[/] {e}")
+            write(f"[red]error:[/] {escape(str(e))}")
             continue
         if reply.text:
             write(reply.text)
@@ -565,13 +587,23 @@ def chat(
     Safety Gate and your confirmation. Bring your own provider — Claude, OpenRouter, OpenAI,
     any OpenAI-compatible endpoint, or a fully-local Ollama model. The engine works fully
     without this command."""
+    # Build and preflight the provider *before* the scan: a missing SDK or API key is a
+    # usage error the user should hear about immediately, not after a full home-dir walk.
+    root = _resolve_path(path)
+    provider = _make_provider("ollama" if ollama else provider_name, model, base_url)
+    try:
+        provider.preflight()
+    except ProviderUnavailable as e:
+        # escape(): the remedy text contains `reclaim[ai]`, which rich would eat as markup.
+        err.print(f"[red]error:[/] {escape(str(e))}")
+        raise typer.Exit(2) from e
+
     ruleset = _load_ruleset()
-    res, scanner = _scan_and_classify(_resolve_path(path), workers, context_sensitive, ruleset)
+    res, scanner = _scan_and_classify(root, workers, context_sensitive, ruleset)
     _print_scan_line(res, scanner)
     store = _store()
     _recover(store)
     prefs = _prefs()
-    provider = _make_provider("ollama" if ollama else provider_name, model, base_url)
     agent = Agent(provider, ToolContext(res, preferences=prefs))
     console.print(
         f"[dim]chat ready · {provider.name}:{provider.model or 'default'} · "
@@ -799,7 +831,7 @@ def trends(
 
     History is recorded by `reclaim scan` / `status`. Run one now and again later (or on a
     schedule) to build a trend — nothing here scans; it reads the recorded snapshots."""
-    root = _resolve_path(path)
+    root = _resolve_lookup_path(path)
     try:
         since_days = parse_since(since)
     except ValueError as e:
@@ -823,7 +855,7 @@ def history_cmd(
                                    help="All scanned paths, not just this one"),
 ) -> None:
     """List recorded scan snapshots — the raw history behind `reclaim trends`."""
-    root = None if all_roots else _resolve_path(path)
+    root = None if all_roots else _resolve_lookup_path(path)
     snaps = _history().load(root)
     if not snaps:
         console.print("[dim]no scan history yet. run [bold]reclaim scan[/] to start "

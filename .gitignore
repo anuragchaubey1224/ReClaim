@@ -15,6 +15,8 @@ venv/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+.coverage
+htmlcov/
 
 # Demo GIF is a build artifact — regenerate with `vhs demo/reclaim.tape`
 demo/*.gif

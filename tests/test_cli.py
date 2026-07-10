@@ -130,3 +130,56 @@ def test_protected_unit_is_not_reclaimed(sandbox) -> None:
     assert applied.exit_code == 0
     assert nm.exists()                                # hard-protected by the saved rule
     assert not venv.exists()                          # the unprotected unit is still reclaimed
+
+
+# -- scan-target validation: a typo must be an error, not a clean 0-byte report --
+
+def test_scan_rejects_a_nonexistent_path(tmp_path: Path) -> None:
+    """`reclaim scan ~/dve` must not report "0.0 B reclaimable" as if the disk were clean."""
+    result = runner.invoke(app, ["scan", str(tmp_path / "no-such-dir")])
+    assert result.exit_code == 2
+    assert "does not exist" in result.output
+    assert "Reclaimable" not in result.output
+
+
+def test_scan_rejects_a_file_target(tmp_path: Path) -> None:
+    target = tmp_path / "notes.txt"
+    target.write_text("hello")
+    result = runner.invoke(app, ["scan", str(target)])
+    assert result.exit_code == 2
+    assert "not a directory" in result.output
+
+
+def test_plan_and_apply_also_validate_the_target(tmp_path: Path) -> None:
+    """Validation lives in the shared resolver, so every path-taking command inherits it."""
+    missing = str(tmp_path / "gone")
+    for argv in (["plan", missing], ["apply", missing, "--yes"], ["status", missing]):
+        result = runner.invoke(app, argv)
+        assert result.exit_code == 2, argv
+        assert "does not exist" in result.output, argv
+
+
+def test_scan_still_accepts_a_real_directory(sandbox) -> None:
+    target, env = sandbox
+    result = runner.invoke(app, ["scan", str(target)], env=env)
+    assert result.exit_code == 0
+    assert "Reclaimable" in result.output
+
+
+def test_history_lookups_do_not_require_the_path_to_exist(tmp_path: Path) -> None:
+    """`trends`/`history` key into recorded snapshots — a deleted or unmounted root still
+    has a readable trend, so they must not inherit the scan-target existence check."""
+    env = {"RECLAIM_HOME": str(tmp_path / "home")}
+    for argv in (["trends", str(tmp_path / "gone")], ["history", str(tmp_path / "gone")]):
+        result = runner.invoke(app, argv, env=env)
+        assert result.exit_code == 0, argv
+
+
+def test_chat_preflight_error_keeps_the_extras_marker_intact(monkeypatch) -> None:
+    """`reclaim[ai]` must survive rendering — rich would otherwise eat `[ai]` as markup and
+    print an install command that doesn't install the AI extra."""
+    import sys
+    monkeypatch.setitem(sys.modules, "anthropic", None)
+    result = runner.invoke(app, ["chat", "."])
+    assert result.exit_code == 2
+    assert 'reclaim[ai]' in result.output
