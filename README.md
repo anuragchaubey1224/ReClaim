@@ -102,6 +102,9 @@ reclaim apply ~/dev --free 20G
 reclaim ls
 reclaim undo <op-id>          # or just `reclaim undo` for the latest
 reclaim purge --older-than 7  # the only true delete, past a TTL
+
+# 5. open the local browser interface
+reclaim web ~/dev
 ```
 
 Useful flags: `--include-costly` (also take 🟡), `--dormant-only`, `--kind node_modules`,
@@ -121,6 +124,7 @@ Useful flags: `--include-costly` (also take 🟡), `--dormant-only`, `--kind nod
 | `reclaim trends` / `history` | How reclaimable clutter changed over time, per kind (from your scans). |
 | `reclaim watch` | Background monitor — warn before you run out of disk; `--once` for cron/launchd. |
 | `reclaim dashboard` | Live one-screen view: reclaimable space, top units, projects, disk, and trend. |
+| `reclaim web` | Local-only browser UI for scan, selection, plan, apply, and undo. |
 | `reclaim protect` / `unprotect` / `prefs` | Never-touch path rules, enforced by the engine. |
 | `reclaim config` / `config --init` | Custom reclaimable units + protections ([config ref](https://github.com/anuragchaubey1224/ReClaim/blob/main/docs/config-reference.md)). |
 

@@ -1081,5 +1081,22 @@ def dashboard(
         pass
 
 
+@app.command()
+def web(
+    path: Optional[Path] = _PATH_ARG,
+    port: int = typer.Option(0, "--port", min=0, max=65535,
+                             help="Local port (0 chooses a free port)"),
+) -> None:
+    """Open the local browser interface for scanning, planning, apply, and undo.
+
+    The server binds to loopback only. Web actions reuse the same Safety Gate and
+    quarantine flow as the CLI; arbitrary shell commands are not exposed.
+    """
+    from reclaim.web import serve
+
+    root = _resolve_path(path)
+    serve(root, _reclaim_home(), port=port)
+
+
 if __name__ == "__main__":
     app()
